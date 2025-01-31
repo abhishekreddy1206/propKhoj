@@ -1,0 +1,37 @@
+version: "3.8"
+
+services:
+  db:
+    image: ankane/pgvector
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    env_file:
+      - backend/.env  # Load DB variables from .env file
+  
+  backend:
+    build: .
+    container_name: propkhoj_backend
+    command: >
+      sh -c "python manage.py wait_for_db &&
+             python manage.py migrate &&
+             python manage.py runserver 0.0.0.0:8000"
+    ports:
+      - "8000:8000"
+    env_file:
+      - backend/.env  # Load Django variables
+    volumes:
+      - .:/app
+    depends_on:
+      - db
+  
+  pgadmin:
+    image: dpage/pgadmin4
+    env_file:
+      - backend/.env  # Load PGAdmin credentials
+    ports:
+      - "5050:80"
+    depends_on:
+      - db
+
+volumes:
+  pgdata:

@@ -43,6 +43,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'api',
 ]
 
 MIDDLEWARE = [
@@ -80,12 +81,12 @@ WSGI_APPLICATION = 'propkhoj.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/4.2/ref/settings/#databases
 
-DATABASE_URL = os.environ.get('DATABASE_URL')
+DATABASE_URL = os.getenv('DATABASE_URL', 'postgresql://postgres:password@localhost:5432/propkhoj_db')
 db_info = urlparse(DATABASE_URL)
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': db_info.path[1:],
+        'NAME': db_info.path.lstrip('/'),
         'USER': db_info.username,
         'PASSWORD': db_info.password,
         'HOST': db_info.hostname,
@@ -112,7 +113,7 @@ AUTH_PASSWORD_VALIDATORS = [
         'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',
     },
 ]
-
+AUTH_USER_MODEL = "api.User"
 
 # Internationalization
 # https://docs.djangoproject.com/en/4.2/topics/i18n/
@@ -142,11 +143,12 @@ LOGGING = {
     'formatters': {
         'detailed': {
             'format': '{levelname} {asctime} [{module}] {message}',
+            'datefmt': '%Y-%m-%d %H:%M:%S',
             'style': '{',
         },
         'json': {
-            'format': '{"timestamp": "{asctime}", "level": "{levelname}", "module": "{module}", "message": "{message}"}',
-            'style': '{',
+            'format': '{"timestamp": "%(asctime)s", "level": "%(levelname)s", "module": "%(module)s", "message": "%(message)s"}',
+            'datefmt': '%Y-%m-%d %H:%M:%S',
         },
     },
     'handlers': {

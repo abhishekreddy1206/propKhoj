@@ -24,3 +24,4 @@ numpy==1.24.2  # Needed for vector calculations
 
 # Additional Utils
 gunicorn==20.1.0  # Production WSGI server
+supabase==2.12.0

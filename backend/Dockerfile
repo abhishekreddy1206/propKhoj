@@ -6,6 +6,7 @@ WORKDIR /app
 
 # Copy project files
 COPY . /app
+RUN mkdir -p /app/logs
 
 COPY requirements.txt .
 # Install dependencies

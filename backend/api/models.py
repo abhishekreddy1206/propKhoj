@@ -1,5 +1,5 @@
 from django.db import models
-from django.contrib.auth.models import AbstractUser
+from django.contrib.auth.models import AbstractUser, Group, Permission
 from pgvector.django import VectorField
 from django.contrib.postgres.fields import ArrayField
 
@@ -14,8 +14,11 @@ class User(AbstractUser):
 
     user_type = models.CharField(max_length=10, choices=USER_TYPE_CHOICES, default='buyer')
     phone_number = models.CharField(max_length=15, unique=True)
-    device_info = models.CharField(max_length=255, blank=True, null=True)  
+    device_info = models.CharField(max_length=255, blank=True, null=True)
     address = models.TextField(blank=True, null=True)
+
+    groups = models.ManyToManyField(Group, related_name="api_users", blank=True)
+    user_permissions = models.ManyToManyField(Permission, related_name="api_user_permissions", blank=True)
 
     def __str__(self):
         return f"{self.username} ({self.user_type})"

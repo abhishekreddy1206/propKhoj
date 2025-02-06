@@ -10,4 +10,5 @@ router.register(r'users', UserViewSet)
 
 urlpatterns = [
     path('', include(router.urls)),
+    path('chat/', ChatMessageViewSet.as_view({'post': 'chat'}), name="chat"),
 ]

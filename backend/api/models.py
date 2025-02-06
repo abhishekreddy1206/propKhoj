@@ -2,6 +2,14 @@ from django.db import models
 from django.contrib.auth.models import AbstractUser, Group, Permission
 from pgvector.django import VectorField
 from django.contrib.postgres.fields import ArrayField
+from django.utils.timezone import now
+from openai import OpenAI
+import logging
+
+logger = logging.getLogger('django')
+chat_logger = logging.getLogger('chat')
+
+client = OpenAI()
 
 
 class User(AbstractUser):
@@ -73,8 +81,57 @@ class Property(models.Model):
         verbose_name_plural = "Properties"
 
 
+class ConversationManager(models.Manager):
+    def get_or_create_conversation(self, user, conversation_id=None):
+        """
+        Retrieve an existing conversation or create a new one.
+        """
+        if conversation_id:
+            try:
+                return self.get(id=conversation_id)
+            except Conversation.DoesNotExist:
+                raise ValueError("Invalid conversation ID")
+        return self.create(user=user)
+
+
+class ChatMessageManager(models.Manager):
+    def store_message(self, conversation, user, text, sender):
+        """
+        Store a new chat message.
+        """
+        return self.create(conversation=conversation, user=user, text=text, sender=sender)
+
+    def get_chat_history(self, conversation):
+        """
+        Retrieve chat history in OpenAI format.
+        """
+        chat_history = self.filter(conversation=conversation).order_by("timestamp")
+        formatted_messages = [{"role": "system", "content": "You are a helpful real estate AI assistant."}]
+
+        for msg in chat_history:
+            role = "user" if msg.sender == "user" else "assistant"
+            formatted_messages.append({"role": role, "content": msg.text})
+
+        return formatted_messages
+
+    def get_ai_response(self, conversation):
+        """
+        Call OpenAI API and return a response.
+        """
+        messages = self.get_chat_history(conversation)
+
+        try:
+            response = client.chat.completions.create(
+                model="gpt-4-turbo",
+                messages=messages
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            logger.error(f"OpenAI API error: {str(e)}")
+            return "I'm currently unable to fetch responses. Please try again later."
+
+
 class Conversation(models.Model):
-    id = models.AutoField(primary_key=True)
     user = models.ForeignKey(User, on_delete=models.CASCADE, null=True, blank=True)
     started_at = models.DateTimeField(auto_now_add=True)
     last_updated = models.DateTimeField(auto_now=True)
@@ -90,7 +147,6 @@ class ChatMessage(models.Model):
         ('bot', 'Bot'),
     ]
 
-    id = models.AutoField(primary_key=True)
     conversation = models.ForeignKey(Conversation, on_delete=models.CASCADE, related_name="messages")
     user = models.ForeignKey(User, on_delete=models.CASCADE, null=True, blank=True)
     text = models.TextField()

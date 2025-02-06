@@ -7,20 +7,21 @@ djangorestframework-simplejwt==5.2.2  # For JWT authentication (optional)
 
 # PostgreSQL with pgvector
 psycopg2-binary==2.9.6
-pgvector==0.2.1  # Required for AI search with vector embeddings
+pgvector  # Required for AI search with vector embeddings
 
 # Environment Variables
-python-dotenv==1.0.0
+python-dotenv
 
 # CORS Handling
-django-cors-headers==4.3.0
+django-cors-headers
 
 # Logging & Monitoring
 django-extensions==3.2.3
 
-# AI & OpenAI API Support (if needed for RAG)
-openai==0.27.8  # For AI-powered search if using OpenAI embeddings
-numpy==1.24.2  # Needed for vector calculations
+# AI & OpenAI API Support
+openai  # Ensure OpenAI client usage is compatible
+numpy>=1.24.2  # Needed for vector calculations
+pydantic>=1.10.7  # Required for OpenAI API calls
 
 # Additional Utils
 gunicorn==20.1.0  # Production WSGI server

@@ -1,23 +1,15 @@
+name: propkhoj
+
 version: "3.8"
 
 services:
-  # db:
-  #   image: ankane/pgvector
-  #   volumes:
-  #     - pgdata:/var/lib/postgresql/data
-  #   env_file:
-  #     - backend/.env
-  #   networks:
-  #     - app-network
-
   backend:
     build: 
       context: ./backend
       dockerfile: Dockerfile
     container_name: propkhoj_backend
     command: >
-      sh -c "python manage.py wait_for_db &&
-             python manage.py migrate &&
+      sh -c "python manage.py migrate &&
              python manage.py runserver 0.0.0.0:8000"
     ports:
       - "8000:8000"
@@ -28,8 +20,6 @@ services:
       - ./backend/logs:/app/logs
     networks:
       - app-network
-    # depends_on:
-    #   - db
 
   frontend:
     build:
@@ -47,22 +37,6 @@ services:
     depends_on:
       - backend
 
-  # pgadmin:
-  #   image: dpage/pgadmin4
-  #   env_file:
-  #     - backend/.env
-  #   ports:
-  #     - "5050:80"
-  #   networks:
-  #     - app-network
-  #   depends_on:
-  #     - db
-  #   volumes:
-  #     - ./pgadmin/servers.json:/pgadmin4/servers.json
-
 networks:
   app-network:
     name: propkhoj-network
-
-volumes:
-  pgdata:

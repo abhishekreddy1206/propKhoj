@@ -1,24 +1,13 @@
+name: propkhoj
+
 version: "3.8"
 
 services:
-  # db:
-  #   extends:
-  #     file: ../docker-compose.base.yml
-  #     service: db
-
   backend:
     extends:
       file: ../docker-compose.base.yml
       service: backend
 
-  # pgadmin:
-  #   extends:
-  #     file: ../docker-compose.base.yml
-  #     service: pgadmin
-
 networks:
   app-network:
     name: propkhoj-network
-
-volumes:
-  pgdata:

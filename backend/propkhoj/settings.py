@@ -47,7 +47,7 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
-    # 'backend.middleware.AccessLoggingMiddleware',
+    'api.middleware.AccessLoggingMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -199,7 +199,7 @@ LOGGING = {
             'propagate': False,
         },
         'chat': {
-            'handlers': ['file_chat'],
+            'handlers': ['file_chat', 'console'],
             'level': 'INFO',
             'propagate': False,
         },

@@ -31,12 +31,14 @@ SECRET_KEY = os.getenv('DJANGO_SECRET_KEY')
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv('DJANGO_DEBUG')
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ["localhost"]
 
 
 # Application definition
 
 INSTALLED_APPS = [
+    'corsheaders',
+    'rest_framework',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -47,6 +49,7 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    'corsheaders.middleware.CorsMiddleware',
     'api.middleware.AccessLoggingMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
@@ -56,6 +59,30 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
+
+CORS_ALLOW_ALL_ORIGINS = True  # Allows all origins, useful for development
+CORS_ALLOW_METHODS = ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+CORS_ALLOW_HEADERS = [
+    "content-type",
+    "authorization",
+    "accept",
+    "origin",
+    "x-csrftoken",
+    "x-requested-with",
+]
+CORS_ALLOW_CREDENTIALS = True
+# CORS_ALLOW_HEADERS = ["*"]
+# CORS_ALLOWED_ORIGINS = [
+#     "http://localhost:3000",  # React Dev Server
+#     "http://127.0.0.1:3000",
+# ]
+
+# ✅ CSRF Protection
+CSRF_TRUSTED_ORIGINS = ["http://localhost:3000"]
+CSRF_HEADER_NAME = "HTTP_X_CSRFTOKEN"
+CSRF_COOKIE_NAME = "csrftoken"
+CSRF_COOKIE_HTTPONLY = False  # ✅ Allow frontend JavaScript to read CSRF token
+CSRF_COOKIE_SECURE = False  # ✅ Set to True in production with HTTPS
 
 ROOT_URLCONF = 'propkhoj.urls'
 
@@ -93,7 +120,6 @@ DATABASES = {
         'PORT': db_info.port,
     }
 }
-
 
 
 # Password validation

@@ -6,6 +6,8 @@ from django.conf import settings
 from rest_framework import viewsets, status
 from rest_framework.response import Response
 from rest_framework.decorators import action
+from django.utils.decorators import method_decorator
+from django.views.decorators.csrf import csrf_exempt
 from django.db.models import Q
 from .models import Property, ChatMessage, Conversation, User
 from .serializers import PropertySerializer, ChatMessageSerializer, ConversationSerializer, UserSerializer
@@ -18,7 +20,8 @@ class ChatMessageViewSet(viewsets.ModelViewSet):
     queryset = ChatMessage.objects.all()
     serializer_class = ChatMessageSerializer
 
-    @action(detail=False, methods=['post'])
+    @method_decorator(csrf_exempt)
+    @action(detail=False, methods=['options', 'post'])
     def chat(self, request):
         """
         Handles chat with OpenAI and stores conversation history.

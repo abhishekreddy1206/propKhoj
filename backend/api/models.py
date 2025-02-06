@@ -137,6 +137,8 @@ class Conversation(models.Model):
     last_updated = models.DateTimeField(auto_now=True)
     status = models.CharField(max_length=20, choices=[('active', 'Active'), ('closed', 'Closed')], default='active')
 
+    objects = ConversationManager()  # Assign custom manager
+
     def __str__(self):
         return f"Conversation {self.id} - {self.user.username if self.user else 'Guest'}"
 
@@ -153,6 +155,8 @@ class ChatMessage(models.Model):
     sender = models.CharField(max_length=10, choices=SENDER_CHOICES)
     timestamp = models.DateTimeField(auto_now_add=True)
     properties = models.ManyToManyField(Property, blank=True)
+
+    objects = ChatMessageManager()
 
     def __str__(self):
         return f"{self.sender}: {self.text[:50]}..."

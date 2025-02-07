@@ -1,9 +1,14 @@
 # Django Framework
 Django==4.2
 
+# Authentication
+django-allauth
+dj-rest-auth
+social-auth-app-django
+
 # Django REST Framework
-djangorestframework==3.14.0
-djangorestframework-simplejwt==5.2.2  # For JWT authentication (optional)
+djangorestframework
+djangorestframework-simplejwt
 
 # PostgreSQL with pgvector
 psycopg2-binary==2.9.6

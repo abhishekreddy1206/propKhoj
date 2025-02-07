@@ -21,6 +21,8 @@ services:
       - ./backend/logs:/app/logs
     networks:
       - app-network
+    stdin_open: true
+    tty: true
 
   frontend:
     build:

@@ -12,7 +12,7 @@ from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.authentication import SessionAuthentication, TokenAuthentication
 from django.utils.decorators import method_decorator
-from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.csrf import csrf_exempt, ensure_csrf_cookie
 from django.db.models import Q
 from .models import Property, ChatMessage, Conversation, User
 from .serializers import PropertySerializer, ChatMessageSerializer, ConversationSerializer, UserSerializer
@@ -83,20 +83,21 @@ class ChatMessageViewSet(viewsets.ModelViewSet):
         Generates follow-up prompts if conversation_id is provided.
         """
         conversation_id = request.query_params.get('conversation_id')
-        import pdb
-        pdb.set_trace()
+
         try:
             if conversation_id:
+                logger.info(f"Fetching prompts for conversation {conversation_id}")
                 conversation = get_object_or_404(Conversation, id=conversation_id, user=request.user)
                 prompts = ChatMessage.objects.get_sample_prompts(conversation)
             else:
+                logger.info("Fetching default prompts")
                 prompts = ChatMessage.objects.get_sample_prompts()
                 
             return Response({"prompts": prompts}, status=status.HTTP_200_OK)
         except Exception as e:
             logger.error(f"Error fetching sample prompts: {str(e)}")
             return Response(
-                {"error": "Failed to fetch sample prompts"}, 
+                {"error": f"Failed to fetch sample prompts: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
@@ -134,6 +135,7 @@ class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all()
     serializer_class = UserSerializer
 
+    @method_decorator(ensure_csrf_cookie)
     @action(detail=False, methods=['post'])
     def login(self, request):
         """

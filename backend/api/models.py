@@ -135,51 +135,66 @@ class ChatMessageManager(models.Manager):
         Get AI-generated sample prompts for the chat interface.
         If conversation is provided, generates follow-up prompts based on chat history.
         """
-        if not conversation:
-            # Initial prompts for new conversations
-            messages = [
-                {"role": "system", "content": "You are a helpful real estate AI assistant. Generate 4 sample questions that users might ask about real estate. Return them as a JSON array of strings."},
-                {"role": "user", "content": "Generate 4 sample prompts"}
-            ]
-        else:
-            # Get conversation history and generate relevant follow-ups
-            chat_history = self.get_chat_history(conversation)
-            
-            system_prompt = """You are a helpful real estate AI assistant. Based on the conversation history provided, 
-            generate 4 relevant follow-up questions that the user might want to ask. These should be natural continuations 
-            of the conversation and relate to previously discussed topics. Return them as a JSON array of strings."""
-            
-            messages = [
-                {"role": "system", "content": system_prompt},
-                *chat_history[1:],  # Skip the initial system message
-                {"role": "user", "content": "Based on this conversation, what are 4 relevant follow-up questions I might want to ask?"}
-            ]
-
+        sample_prompts = [
+            "Find me a 2BHK apartment in Bangalore",
+            "Show me commercial office spaces under ₹50L",
+            "What are the best areas to invest in Mumbai?",
+            "List luxury villas in Delhi"
+        ]
+        
+        sample_prompts_followup = [
+            "Can you tell me more about the property?",
+            "What are the nearby amenities?",
+            "How is the connectivity to the city center?",
+            "What are the payment terms?"
+        ]
+        
         try:
-            response = client.chat.completions.create(
-                model="gpt-4-turbo",
-                messages=messages,
-                response_format={ "type": "json_object" }
-            )
-            prompts = json.loads(response.choices[0].message.content)
-            return prompts.get("prompts", [])
-        except Exception as e:
-            logger.error(f"Error generating sample prompts: {str(e)}")
-            # Fallback prompts
+            system_prompt = f"""You are a helpful real estate AI assistant. Generate 4 sample questions that users might ask about real estate. 
+            Use these as examples but not the same: {json.dumps(sample_prompts)}
+            Return them in this exact JSON format:
+            {{
+                "prompts": [
+                    "question 1",
+                    "question 2",
+                    "question 3",
+                    "question 4"
+                ]
+            }}"""
+            
             if not conversation:
-                return [
-                    "Find me a 2BHK apartment in Bangalore",
-                    "Show me commercial office spaces under ₹50L",
-                    "What are the best areas to invest in Mumbai?",
-                    "List luxury villas in Delhi"
+                messages = [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": "Generate 4 sample prompts"}
                 ]
             else:
-                return [
-                    "Can you tell me more about the property?",
-                    "What are the nearby amenities?",
-                    "How is the connectivity to the city center?",
-                    "What are the payment terms?"
+                chat_history = self.get_chat_history(conversation)
+                messages = [
+                    {"role": "system", "content": system_prompt},
+                    *chat_history[1:],
+                    {"role": "user", 
+                     "content": f"""Based on this conversation, what are 4 relevant follow-up questions I might want to ask? 
+                                    Use these as examples but not the same: {json.dumps(sample_prompts_followup)}"""}
                 ]
+
+            logger.info(f"Sending messages to OpenAI: {json.dumps(messages)}")
+            
+            response = client.chat.completions.create(
+                model="gpt-4-turbo-preview",  # Updated model name
+                messages=messages,
+                response_format={"type": "json_object"}
+            )
+            
+            content = response.choices[0].message.content
+            logger.info(f"OpenAI response content: {content}")
+            
+            prompts = json.loads(content)
+            return prompts.get("prompts", [])
+            
+        except Exception as e:
+            logger.error(f"Error in get_sample_prompts: {str(e)}", exc_info=True)
+            # Return fallback prompts
+            return sample_prompts if not conversation else sample_prompts_followup
 
 
 class Conversation(models.Model):

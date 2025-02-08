@@ -89,6 +89,8 @@ CORS_ALLOW_CREDENTIALS = True
 # ]
 
 # ✅ CSRF Protection
+CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOWED_ORIGINS = ["http://localhost:3000"]  # Your React development server
 CSRF_TRUSTED_ORIGINS = ["http://localhost:3000"]
 CSRF_HEADER_NAME = "HTTP_X_CSRFTOKEN"
 CSRF_COOKIE_NAME = "csrftoken"

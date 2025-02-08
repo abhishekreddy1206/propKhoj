@@ -14,13 +14,19 @@ Including another URLconf
     1. Import the include() function: from django.urls import include, path
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
+from django.http import JsonResponse
 from django.contrib import admin
 from django.urls import path, include
+from django.views import View
+from django.middleware.csrf import get_token
+from django.views.decorators.csrf import ensure_csrf_cookie
+from django.utils.decorators import method_decorator
 from dj_rest_auth.registration.views import SocialLoginView
 from allauth.socialaccount.providers.google.views import GoogleOAuth2Adapter
 from allauth.socialaccount.providers.facebook.views import FacebookOAuth2Adapter
 from allauth.socialaccount.providers.github.views import GitHubOAuth2Adapter
 from allauth.socialaccount.providers.oauth2.client import OAuth2Client
+
 
 class GoogleLogin(SocialLoginView):
     adapter_class = GoogleOAuth2Adapter
@@ -32,10 +38,18 @@ class FacebookLogin(SocialLoginView):
     callback_url = "http://localhost:3000"
     client_class = OAuth2Client
 
+
 class GithubLogin(SocialLoginView):
     adapter_class = GitHubOAuth2Adapter
     callback_url = "http://localhost:3000"
     client_class = OAuth2Client
+
+
+@method_decorator(ensure_csrf_cookie, name='dispatch')
+class CSRFTokenView(View):
+    def get(self, request):
+        return JsonResponse({"csrfToken": get_token(request)})
+
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -43,6 +57,7 @@ urlpatterns = [
     # 🔹 Email/Password Auth
     path('auth/', include('dj_rest_auth.urls')),
     path('auth/registration/', include('dj_rest_auth.registration.urls')),
+    path('auth/csrf/', CSRFTokenView.as_view(), name="csrf_token"),
 
     # 🔹 Social Authentication Endpoints
     path('auth/google/', GoogleLogin.as_view(), name='google_login'),

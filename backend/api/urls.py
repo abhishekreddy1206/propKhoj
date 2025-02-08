@@ -4,7 +4,7 @@ from .views import PropertyViewSet, ChatMessageViewSet, ConversationViewSet, Use
 
 router = DefaultRouter()
 router.register(r'properties', PropertyViewSet)
-router.register(r'chats', ChatMessageViewSet, basename="chats")
+# router.register(r'chats', ChatMessageViewSet, basename="chats")
 router.register(r'conversations', ConversationViewSet)
 router.register(r'users', UserViewSet)
 

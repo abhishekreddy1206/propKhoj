@@ -245,6 +245,7 @@ LOGGING = {
     },
 }
 
+SITE_ID = 1
 
 AUTHENTICATION_BACKENDS = [
     'django.contrib.auth.backends.ModelBackend',
@@ -259,15 +260,35 @@ ACCOUNT_EMAIL_VERIFICATION = "optional"
 
 SOCIALACCOUNT_PROVIDERS = {
     'google': {
-        'SCOPE': ['email', 'profile'],
-        'AUTH_PARAMS': {'access_type': 'online'},
-    },
-    'github': {
-        'SCOPE': ['user'],
+        'APP': {
+            'client_id': 'your-google-client-id',
+            'secret': 'your-google-client-secret',
+            'key': ''
+        },
+        'SCOPE': [
+            'profile',
+            'email',
+        ],
+        'AUTH_PARAMS': {
+            'access_type': 'online',
+        }
     },
     'facebook': {
-        'METHOD': 'oauth2',
-        'SCOPE': ['email'],
+        'APP': {
+            'client_id': 'your-facebook-app-id',
+            'secret': 'your-facebook-app-secret',
+            'key': ''
+        },
+        'SCOPE': ['email', 'public_profile'],
         'AUTH_PARAMS': {'auth_type': 'reauthenticate'},
+        'METHOD': 'oauth2'
     },
+    'github': {
+        'APP': {
+            'client_id': 'your-github-client-id',
+            'secret': 'your-github-client-secret',
+            'key': ''
+        },
+        'SCOPE': ['user:email']
+    }
 }

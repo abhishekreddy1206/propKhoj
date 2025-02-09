@@ -179,3 +179,24 @@ class UserViewSet(viewsets.ModelViewSet):
             serializer = self.get_serializer(request.user)
             return Response(serializer.data)
         return Response(status=status.HTTP_401_UNAUTHORIZED)
+
+
+class UserProfileView(viewsets.ViewSet):
+    # permission_classes = [IsAuthenticated]
+
+    @action(detail=False, methods=['get'])
+    def me(self, request):
+        """Retrieve logged-in user's profile"""
+        user = request.user
+        return Response(UserSerializer(user).data)
+
+    @action(detail=False, methods=['post'])
+    def update_profile(self, request):
+        """Update user's profile"""
+        user = request.user
+        serializer = UserSerializer(user, data=request.data, partial=True)
+
+        if serializer.is_valid():
+            serializer.save(profile_completed=True)
+            return Response(serializer.data)
+        return Response(serializer.errors, status=400)

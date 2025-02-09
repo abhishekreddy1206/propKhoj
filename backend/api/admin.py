@@ -25,6 +25,14 @@ class PropertyAdmin(admin.ModelAdmin):
     ordering = ('title',)
     readonly_fields = ('embedding',)
 
+    def has_add_permission(self, request):
+        # Allow adding if the user is in the 'Agent' or 'Admin' group
+        return request.user.groups.filter(name__in=['Agent', 'Admin']).exists()
+
+    def has_delete_permission(self, request, obj=None):
+        # Allow deleting only if the user is in the 'Admin' group
+        return request.user.groups.filter(name='Admin').exists()
+
 
 @admin.register(Conversation)
 class ConversationAdmin(admin.ModelAdmin):

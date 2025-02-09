@@ -26,7 +26,11 @@ from allauth.socialaccount.providers.google.views import GoogleOAuth2Adapter
 from allauth.socialaccount.providers.facebook.views import FacebookOAuth2Adapter
 from allauth.socialaccount.providers.github.views import GitHubOAuth2Adapter
 from allauth.socialaccount.providers.oauth2.client import OAuth2Client
-
+from .auth_views import (
+    GoogleLoginInit, GoogleLoginCallback,
+    FacebookLoginInit, FacebookLoginCallback,
+    GithubLoginInit, GithubLoginCallback
+)
 
 class GoogleLogin(SocialLoginView):
     adapter_class = GoogleOAuth2Adapter
@@ -63,6 +67,15 @@ urlpatterns = [
     path('auth/google/', GoogleLogin.as_view(), name='google_login'),
     path('auth/facebook/', FacebookLogin.as_view(), name='facebook_login'),
     path('auth/github/', GithubLogin.as_view(), name='github_login'),
+
+    path('auth/google/init/', GoogleLoginInit.as_view(), name='google_login_init'),
+    path('auth/google/callback/', GoogleLoginCallback.as_view(), name='google_login_callback'),
+    
+    path('auth/facebook/init/', FacebookLoginInit.as_view(), name='facebook_login_init'),
+    path('auth/facebook/callback/', FacebookLoginCallback.as_view(), name='facebook_login_callback'),
+    
+    path('auth/github/init/', GithubLoginInit.as_view(), name='github_login_init'),
+    path('auth/github/callback/', GithubLoginCallback.as_view(), name='github_login_callback'),
 
     # 🔹 API Routes
     path('api/', include('api.urls')),

@@ -1,6 +1,6 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
-from .models import User, Property, Conversation, ChatMessage
+from .models import User, Property, Conversation, ChatMessage, Address
 
 
 @admin.register(User)
@@ -19,8 +19,8 @@ class CustomUserAdmin(UserAdmin):
 
 @admin.register(Property)
 class PropertyAdmin(admin.ModelAdmin):
-    list_display = ('title', 'property_type', 'price', 'currency', 'availability', 'location')
-    search_fields = ('title', 'location', 'property_id')
+    list_display = ('title', 'property_type', 'price', 'currency', 'availability')
+    search_fields = ('title', 'property_id')
     list_filter = ('property_type', 'currency', 'availability')
     ordering = ('title',)
     readonly_fields = ('embedding',)
@@ -47,6 +47,13 @@ class ChatMessageAdmin(admin.ModelAdmin):
     search_fields = ('conversation__id', 'user__username', 'text')
     list_filter = ('sender', 'timestamp')
 
+
+@admin.register(Address)
+class AddressAdmin(admin.ModelAdmin):
+    list_display = ('street_address', 'unit', 'city', 'state', 'zip_code', 'latitude', 'longitude', 'is_verified')
+    search_fields = ('street_address', 'city', 'state', 'zip_code')
+    list_filter = ('state', 'is_verified')
+    ordering = ('city', 'state')
 
 # Optional: Registering models manually if @admin.register is not used
 # admin.site.register(User, CustomUserAdmin)

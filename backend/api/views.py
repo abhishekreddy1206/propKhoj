@@ -15,7 +15,7 @@ from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt, ensure_csrf_cookie
 from django.db.models import Q
 from .models import Property, ChatMessage, Conversation, User
-from .serializers import PropertySerializer, ChatMessageSerializer, ConversationSerializer, UserSerializer
+from .serializers import PropertySerializer, ChatMessageSerializer, ConversationSerializer, CustomUserSerializer, UserSerializer
 import logging
 
 logger = logging.getLogger('django')
@@ -188,13 +188,13 @@ class UserProfileView(viewsets.ViewSet):
     def me(self, request):
         """Retrieve logged-in user's profile"""
         user = request.user
-        return Response(UserSerializer(user).data)
+        return Response(CustomUserSerializer(user).data)
 
     @action(detail=False, methods=['post'])
     def update_profile(self, request):
         """Update user's profile"""
         user = request.user
-        serializer = UserSerializer(user, data=request.data, partial=True)
+        serializer = CustomUserSerializer(user, data=request.data, partial=True)
 
         if serializer.is_valid():
             serializer.save(profile_completed=True)

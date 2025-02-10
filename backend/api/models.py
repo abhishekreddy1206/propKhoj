@@ -1,11 +1,79 @@
 from django.db import models
+from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.contrib.auth.models import AbstractUser, Group, Permission
 from pgvector.django import VectorField
 import logging
 from .managers import ChatMessageManager, ConversationManager
+from googlemaps import Client
 
 logger = logging.getLogger('django')
 chat_logger = logging.getLogger('chat')
+
+
+class Address(models.Model):
+    street_address = models.CharField(max_length=255, help_text="Street number and name")
+    unit = models.CharField(max_length=50, blank=True, null=True, help_text="Apartment, suite, unit, etc.")
+    city = models.CharField(max_length=100)
+    state = models.CharField(max_length=2, help_text="Two-letter state code")
+    zip_code = models.CharField(max_length=10, help_text="ZIP or ZIP+4 code")
+    county = models.CharField(max_length=100, blank=True, null=True)
+    
+    # Geo coordinates
+    latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    
+    formatted_address = models.CharField(max_length=512, blank=True, null=True, help_text="Google-formatted complete address")
+    place_id = models.CharField(max_length=255, blank=True, null=True, help_text="Google Places ID for this address")
+    is_verified = models.BooleanField(default=False)
+
+    class Meta:
+        verbose_name_plural = "Addresses"
+        indexes = [
+            models.Index(fields=['zip_code']),
+            models.Index(fields=['city', 'state']),
+        ]
+
+    def clean(self):
+        if not hasattr(settings, 'GOOGLE_MAPS_API_KEY'):
+            raise ValidationError("Google Maps API key is not configured")
+        
+        self.geocode_address()
+
+    def geocode_address(self):
+        """
+        Use Google's Geocoding API to verify and enhance the address data
+        """
+        try:
+            gmaps = Client(key=settings.GOOGLE_MAPS_API_KEY)
+            address_str = self.__str__()
+            
+            # Geocode the address
+            result = gmaps.geocode(address_str)
+            
+            if result and len(result) > 0:
+                location = result[0]['geometry']['location']
+                self.latitude = location['lat']
+                self.longitude = location['lng']
+                self.formatted_address = result[0]['formatted_address']
+                self.place_id = result[0]['place_id']
+                self.is_verified = True
+            else:
+                self.is_verified = False
+                
+        except Exception as e:
+            logger.error(f"Geocoding error for address {address_str}: {str(e)}")
+            self.is_verified = False
+    
+    def save(self, *args, **kwargs):
+        self.clean()
+        super().save(*args, **kwargs)
+    
+    def __str__(self):
+        base = f"{self.street_address}"
+        if self.unit:
+            base += f" {self.unit}"
+        return f"{base}, {self.city}, {self.state} {self.zip_code}"
 
 
 class User(AbstractUser):
@@ -19,7 +87,7 @@ class User(AbstractUser):
     user_type = models.CharField(max_length=10, choices=USER_TYPE_CHOICES, default='buyer')
     phone_number = models.CharField(max_length=15, unique=True)
     device_info = models.CharField(max_length=255, blank=True, null=True)
-    address = models.TextField(blank=True, null=True)
+    address = models.ForeignKey(Address, on_delete=models.SET_NULL, null=True, blank=True)
 
     groups = models.ManyToManyField(Group, related_name="api_users", blank=True)
     user_permissions = models.ManyToManyField(Permission, related_name="api_user_permissions", blank=True)
@@ -51,8 +119,7 @@ class Property(models.Model):
     property_id = models.CharField(max_length=50, unique=True)
     title = models.CharField(max_length=255)
     description = models.TextField()
-    location = models.CharField(max_length=255)
-    latitude = models.FloatField()
+    address = models.ForeignKey(Address, on_delete=models.PROTECT, null=True, blank=True)
     longitude = models.FloatField()
     price = models.FloatField()
     currency = models.CharField(max_length=3, choices=CURRENCY_CHOICES, default='INR')

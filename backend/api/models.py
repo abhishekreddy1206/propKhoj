@@ -1,10 +1,11 @@
+import logging, uuid
 from django.db import models
 from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.contrib.auth.models import AbstractUser, Group, Permission
 from pgvector.django import VectorField
-import logging
-from .managers import ChatMessageManager, ConversationManager
+from .managers import ChatMessageManager, ConversationManager, PropertyManager
 from googlemaps import Client
 
 logger = logging.getLogger('django')
@@ -12,7 +13,7 @@ chat_logger = logging.getLogger('chat')
 
 
 class Address(models.Model):
-    street_address = models.CharField(max_length=255, help_text="Street number and name")
+    street_address = models.CharField(max_length=255, blank=True, null=True, help_text="Street number and name")
     unit = models.CharField(max_length=50, blank=True, null=True, help_text="Apartment, suite, unit, etc.")
     city = models.CharField(max_length=100)
     state = models.CharField(max_length=2, help_text="Two-letter state code")
@@ -88,6 +89,7 @@ class User(AbstractUser):
     phone_number = models.CharField(max_length=15, unique=True)
     device_info = models.CharField(max_length=255, blank=True, null=True)
     address = models.ForeignKey(Address, on_delete=models.SET_NULL, null=True, blank=True)
+    profile_image = models.URLField(max_length=500, blank=True, null=True)
 
     groups = models.ManyToManyField(Group, related_name="api_users", blank=True)
     user_permissions = models.ManyToManyField(Permission, related_name="api_user_permissions", blank=True)
@@ -96,51 +98,181 @@ class User(AbstractUser):
     def __str__(self):
         return f"{self.username} ({self.user_type})"
 
-class Property(models.Model):
-    CURRENCY_CHOICES = [
-        ('INR', 'Indian Rupee'),
-        ('USD', 'US Dollar'),
-        ('EUR', 'Euro'),
+
+class Currency(models.Model):
+    code = models.CharField(max_length=3, unique=True)
+    name = models.CharField(max_length=50)
+    symbol = models.CharField(max_length=5)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        verbose_name_plural = "Currencies"
+
+    def __str__(self):
+        return f"{self.code} - {self.name}"
+
+
+class PropertyType(models.Model):
+    name = models.CharField(max_length=50)
+    slug = models.SlugField(unique=True)
+    description = models.TextField(blank=True)
+    is_active = models.BooleanField(default=True)
+
+    def __str__(self):
+        return self.name
+
+
+class ListingStatus(models.Model):
+    name = models.CharField(max_length=50)
+    slug = models.SlugField(unique=True)
+    description = models.TextField(blank=True)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        verbose_name_plural = "Listing Statuses"
+
+    def __str__(self):
+        return self.name
+
+
+class Amenity(models.Model):
+    name = models.CharField(max_length=100)
+    slug = models.SlugField(unique=True)
+    description = models.TextField(blank=True)
+    icon = models.CharField(max_length=50, blank=True)  # For UI icons
+    category = models.CharField(max_length=50, blank=True)  # e.g., 'security', 'comfort', 'luxury'
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        verbose_name_plural = "Amenities"
+
+    def __str__(self):
+        return self.name
+
+
+class PropertyImage(models.Model):
+    IMAGE_TYPE_CHOICES = [
+        ('primary', 'Primary Image'),
+        ('exterior', 'Exterior'),
+        ('interior', 'Interior'),
+        ('floor_plan', 'Floor Plan'),
+        ('other', 'Other')
     ]
 
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    property = models.ForeignKey('Property', on_delete=models.CASCADE, related_name='property_images')
+    image_type = models.CharField(max_length=20, choices=IMAGE_TYPE_CHOICES, default='other')
+    image_url = models.URLField(max_length=500)
+    storage_path = models.CharField(max_length=500)  # Path in Supabase storage
+    title = models.CharField(max_length=255, blank=True)
+    alt_text = models.CharField(max_length=255, blank=True)
+    is_primary = models.BooleanField(default=False)
+    order = models.IntegerField(default=0)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['order', 'uploaded_at']
+        indexes = [
+            models.Index(fields=['property', 'image_type']),
+            models.Index(fields=['property', 'is_primary']),
+        ]
+
+    def __str__(self):
+        return f"{self.property.property_id} - {self.image_type} Image"
+
+    def save(self, *args, **kwargs):
+        if self.is_primary:
+            # Ensure only one primary image per property
+            PropertyImage.objects.filter(property=self.property, is_primary=True).exclude(id=self.id).update(is_primary=False)
+        super().save(*args, **kwargs)
+
+
+class Property(models.Model):
     PRICE_TYPE_CHOICES = [
         ('monthly', 'Monthly'),
         ('yearly', 'Yearly'),
         ('one_time', 'One Time'),
     ]
 
-    PROPERTY_TYPE_CHOICES = [
-        ('house_rent', 'House for Rent'),
-        ('house_sale', 'House for Sale'),
-        ('apartment_rent', 'Apartment for Rent'),
-        ('apartment_sale', 'Apartment for Sale'),
-    ]
-
+    # Basic Information
     property_id = models.CharField(max_length=50, unique=True)
-    title = models.CharField(max_length=255)
-    description = models.TextField()
+    title = models.CharField(null=True, blank=True, max_length=255)
+    description = models.TextField(null=True, blank=True)
     address = models.ForeignKey(Address, on_delete=models.PROTECT, null=True, blank=True)
-    longitude = models.FloatField()
-    price = models.FloatField()
-    currency = models.CharField(max_length=3, choices=CURRENCY_CHOICES, default='INR')
+    
+    # Pricing Information
+    price = models.DecimalField(max_digits=12, decimal_places=2)
+    currency = models.ForeignKey(Currency, on_delete=models.PROTECT)
     price_type = models.CharField(max_length=10, choices=PRICE_TYPE_CHOICES, default='one_time')
+    price_per_sqft = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+
+    # Property Details
+    property_type = models.ForeignKey(PropertyType, on_delete=models.PROTECT)
     bedrooms = models.IntegerField(null=True, blank=True)
     bathrooms = models.IntegerField(null=True, blank=True)
     parking_spaces = models.IntegerField(null=True, blank=True)
+    total_floors = models.IntegerField(null=True, blank=True)
+    floor_number = models.IntegerField(null=True, blank=True)
+
+    # Property Features
     furnished = models.BooleanField(default=False)
-    availability = models.BooleanField(default=True)
-    amenities = models.TextField()  # Can be a comma-separated list or JSON in the future
-    size = models.FloatField(null=True, blank=True)
-    property_type = models.CharField(max_length=50, choices=PROPERTY_TYPE_CHOICES, default='house_sale')
+    furnishing_details = models.JSONField(null=True, blank=True) 
+    amenities = models.JSONField(default=list)
+
+    # Building Features
+    year_built = models.IntegerField(null=True, blank=True, validators=[MinValueValidator(1900), MaxValueValidator(2026)])
+    construction_status = models.CharField(max_length=50, null=True, blank=True)
+
+    # Area Information
+    size = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, help_text="Size in square feet")
+    carpet_area = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    plot_area = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+
+    # Media
     maps_url = models.URLField(max_length=500, blank=True)
-    image_url = models.URLField(max_length=500, blank=True, null=True)
+    # virtual_tour_url = models.URLField(max_length=500, blank=True, null=True)
+
+    # Additional Details
+    building_name = models.CharField(max_length=255, null=True, blank=True)
+    landmark = models.CharField(max_length=255, null=True, blank=True)
+    possession_date = models.DateField(null=True, blank=True)
+
+    # SEO and Search
+    meta_title = models.CharField(max_length=255, null=True, blank=True)
+    meta_description = models.TextField(null=True, blank=True)
+    tags = models.JSONField(default=list)
+
+    # Listing Status
+    availability = models.BooleanField(default=True)
+    listing_status = models.ForeignKey(ListingStatus, on_delete=models.PROTECT)
+    listed_date = models.DateTimeField(auto_now_add=True)
+    last_updated = models.DateTimeField(auto_now=True)
 
     # Vector Embedding for AI-powered search
     embedding = VectorField(dimensions=1536, db_index=True)
+    embedding_updated_at = models.DateTimeField(null=True, blank=True)
 
+    objects = PropertyManager()
+    
+    def save(self, *args, **kwargs):
+        if self.size and self.price:
+            self.price_per_sqft = self.price / self.size
+        super().save(*args, **kwargs)
+    
     def __str__(self):
         return f"{self.title} ({self.property_type}) - {self.price} {self.currency}"
+    
+    @property
+    def primary_image(self):
+        return self.property_images.filter(is_primary=True).first()
 
+    @property
+    def all_images(self):
+        return self.property_images.all()
+
+    def get_images_by_type(self, image_type):
+        return self.property_images.filter(image_type=image_type)
+    
     class Meta:
         verbose_name_plural = "Properties"
 

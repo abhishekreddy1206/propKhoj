@@ -1,3 +1,4 @@
+from datetime import timezone
 from django.db import models
 from openai import OpenAI
 import logging, json
@@ -123,3 +124,122 @@ class ChatMessageManager(models.Manager):
             logger.error(f"Error in get_sample_prompts: {str(e)}", exc_info=True)
             # Return fallback prompts
             return sample_prompts if not conversation else sample_prompts_followup
+
+
+class PropertyManager(models.Manager):
+    def generate_embedding(self, text):
+        """
+        Generate OpenAI embedding for given text
+        """
+        try:
+            response = client.Embedding.create(
+                model="text-embedding-ada-002",
+                input=text
+            )
+            return response['data'][0]['embedding']
+        except Exception as e:
+            logger.error(f"Error generating embedding: {str(e)}")
+            raise
+
+    def generate_property_text(self, property_instance):
+        """
+        Generate searchable text from property instance
+        """
+        texts = [
+            property_instance.title,
+            property_instance.description,
+            f"Property type: {property_instance.property_type.name}",
+            f"Location: {property_instance.address.city}, {property_instance.address.state}",
+            f"Price: {property_instance.price} {property_instance.currency.code}",
+        ]
+
+        # Add optional fields
+        optional_fields = {
+            'bedrooms': 'bedrooms',
+            'bathrooms': 'bathrooms',
+            'size': 'square feet',
+            'building_name': 'Building',
+            'landmark': 'Landmark'
+        }
+
+        for field, suffix in optional_fields.items():
+            value = getattr(property_instance, field)
+            if value:
+                texts.append(f"{field.replace('_', ' ').title()}: {value} {suffix}")
+
+        # Add amenities
+        amenity_text = ", ".join([amenity.name for amenity in property_instance.amenities.all()])
+        if amenity_text:
+            texts.append(f"Amenities: {amenity_text}")
+
+        # Add tags
+        if property_instance.tags:
+            texts.append("Tags: " + ", ".join(property_instance.tags))
+
+        return " ".join(filter(None, texts))
+
+    def update_embedding(self, property_instance):
+        """
+        Update embedding for a property instance
+        """
+        try:
+            text = self.generate_property_text(property_instance)
+            embedding = self.generate_embedding(text)
+            
+            property_instance.embedding = embedding
+            property_instance.embedding_updated_at = timezone.now()
+            property_instance.save(update_fields=['embedding', 'embedding_updated_at'])
+            
+            logger.info(f"Successfully updated embedding for property {property_instance.property_id}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error updating embedding for property {property_instance.property_id}: {str(e)}")
+            return False
+
+    def search_by_similarity(self, query, limit=10, filters=None):
+        """
+        Search properties using vector similarity
+        """
+        try:
+            query_embedding = self.generate_embedding(query)
+            
+            # Start with base query
+            queryset = self.get_queryset()
+            
+            # Apply any additional filters
+            if filters:
+                queryset = queryset.filter(**filters)
+            
+            # Order by similarity
+            results = queryset.order_by(
+                models.F('embedding').cosine_distance(query_embedding)
+            )[:limit]
+            
+            return results
+            
+        except Exception as e:
+            logger.error(f"Error in search_by_similarity: {str(e)}")
+            raise
+
+    def bulk_update_embeddings(self, queryset=None):
+        """
+        Bulk update embeddings for multiple properties
+        """
+        if queryset is None:
+            queryset = self.get_queryset()
+
+        success_count = 0
+        error_count = 0
+
+        for property_instance in queryset:
+            try:
+                if self.update_embedding(property_instance):
+                    success_count += 1
+                else:
+                    error_count += 1
+            except Exception as e:
+                error_count += 1
+                logger.error(f"Error in bulk update for property {property_instance.property_id}: {str(e)}")
+
+        return {'success': success_count, 'errors': error_count}

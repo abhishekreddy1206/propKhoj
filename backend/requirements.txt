@@ -12,7 +12,7 @@ djangorestframework-simplejwt
 
 # PostgreSQL with pgvector
 psycopg2-binary==2.9.6
-pgvector  # Required for AI search with vector embeddings
+pgvector 
 
 # Environment Variables
 python-dotenv

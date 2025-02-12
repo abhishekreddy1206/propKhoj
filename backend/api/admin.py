@@ -1,6 +1,10 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
-from .models import User, Property, Conversation, ChatMessage, Address
+from .models import (
+    User, Property, Conversation, 
+    ChatMessage, Address, Amenity, Currency,
+    ListingStatus, PropertyType
+)
 
 
 @admin.register(User)
@@ -19,9 +23,12 @@ class CustomUserAdmin(UserAdmin):
 
 @admin.register(Property)
 class PropertyAdmin(admin.ModelAdmin):
-    list_display = ('title', 'property_type', 'price', 'currency', 'availability')
-    search_fields = ('title', 'property_id')
-    list_filter = ('property_type', 'currency', 'availability')
+    list_display = (
+        'title', 'property_type', 'price', 'currency', 'availability', 
+        'address', 'bedrooms', 'bathrooms', 'size', 'building_name', 'landmark'
+    )
+    search_fields = ('title', 'property_id', 'address__street_address', 'address__city')
+    list_filter = ('property_type', 'currency', 'availability', 'address__state')
     ordering = ('title',)
     readonly_fields = ('embedding',)
 
@@ -54,6 +61,30 @@ class AddressAdmin(admin.ModelAdmin):
     search_fields = ('street_address', 'city', 'state', 'zip_code')
     list_filter = ('state', 'is_verified')
     ordering = ('city', 'state')
+
+
+@admin.register(Amenity)
+class AmenityAdmin(admin.ModelAdmin):
+    list_display = ('name',)
+    search_fields = ('name',)
+
+
+@admin.register(Currency)
+class CurrencyAdmin(admin.ModelAdmin):
+    list_display = ('code', 'name', 'symbol')
+    search_fields = ('code', 'name')
+
+
+@admin.register(ListingStatus)
+class ListingStatusAdmin(admin.ModelAdmin):
+    list_display = ('name',)
+    search_fields = ('name',)
+
+
+@admin.register(PropertyType)
+class PropertyTypeAdmin(admin.ModelAdmin):
+    list_display = ('name',)
+    search_fields = ('name',)
 
 # Optional: Registering models manually if @admin.register is not used
 # admin.site.register(User, CustomUserAdmin)

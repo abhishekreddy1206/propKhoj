@@ -1,3 +1,4 @@
+from datetime import datetime
 import logging, uuid
 from django.db import models
 from django.conf import settings
@@ -195,11 +196,11 @@ class Property(models.Model):
     ]
 
     # Basic Information
-    property_id = models.CharField(max_length=50, unique=True)
+    property_id = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
     title = models.CharField(null=True, blank=True, max_length=255)
     description = models.TextField(null=True, blank=True)
     address = models.ForeignKey(Address, on_delete=models.PROTECT, null=True, blank=True)
-    
+
     # Pricing Information
     price = models.DecimalField(max_digits=12, decimal_places=2)
     currency = models.ForeignKey(Currency, on_delete=models.PROTECT)
@@ -230,7 +231,7 @@ class Property(models.Model):
 
     # Media
     maps_url = models.URLField(max_length=500, blank=True)
-    # virtual_tour_url = models.URLField(max_length=500, blank=True, null=True)
+    virtual_tour_url = models.URLField(max_length=500, blank=True, null=True)
 
     # Additional Details
     building_name = models.CharField(max_length=255, null=True, blank=True)
@@ -257,6 +258,18 @@ class Property(models.Model):
     def save(self, *args, **kwargs):
         if self.size and self.price:
             self.price_per_sqft = self.price / self.size
+        
+        if not self.embedding:
+            try:
+                text = Property.objects.generate_property_text(self)
+                self.embedding = Property.objects.generate_embedding(text)
+                self.embedding_updated_at = datetime.now()
+            except Exception as e:
+                logger.error(f"Error generating embedding during save: {str(e)}")
+                # If you want to allow saving without embedding in case of errors:
+                if not kwargs.get('skip_embedding'):
+                    raise
+    
         super().save(*args, **kwargs)
     
     def __str__(self):
@@ -275,6 +288,9 @@ class Property(models.Model):
     
     class Meta:
         verbose_name_plural = "Properties"
+        indexes = [
+            models.Index(fields=['property_id']),
+        ]
 
 
 class Conversation(models.Model):

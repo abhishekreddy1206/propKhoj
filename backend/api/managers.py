@@ -132,11 +132,11 @@ class PropertyManager(models.Manager):
         Generate OpenAI embedding for given text
         """
         try:
-            response = client.Embedding.create(
+            response = client.embeddings.create(
                 model="text-embedding-ada-002",
                 input=text
             )
-            return response['data'][0]['embedding']
+            return list(response.data[0].embedding)
         except Exception as e:
             logger.error(f"Error generating embedding: {str(e)}")
             raise
@@ -167,13 +167,20 @@ class PropertyManager(models.Manager):
             if value:
                 texts.append(f"{field.replace('_', ' ').title()}: {value} {suffix}")
 
-        # Add amenities
-        amenity_text = ", ".join([amenity.name for amenity in property_instance.amenities.all()])
-        if amenity_text:
-            texts.append(f"Amenities: {amenity_text}")
+        # Add amenities (handling as JSON array)
+        if property_instance.amenities:
+            if isinstance(property_instance.amenities, list):
+                amenity_text = ", ".join(property_instance.amenities)
+                texts.append(f"Amenities: {amenity_text}")
+
+        # Add furnishing details if present
+        if property_instance.furnishing_details:
+            if isinstance(property_instance.furnishing_details.get('details', []), list):
+                furnishing_text = ", ".join(property_instance.furnishing_details.get('details', []))
+                texts.append(f"Furnishing: {furnishing_text}")
 
         # Add tags
-        if property_instance.tags:
+        if property_instance.tags and isinstance(property_instance.tags, list):
             texts.append("Tags: " + ", ".join(property_instance.tags))
 
         return " ".join(filter(None, texts))

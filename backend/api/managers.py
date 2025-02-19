@@ -218,12 +218,15 @@ class PropertyManager(models.Manager):
             if filters:
                 queryset = queryset.filter(**filters)
             
-            # Order by similarity
-            results = queryset.order_by(
-                models.F('embedding').cosine_distance(query_embedding)
-            )[:limit]
+            # Use the correct vector comparison syntax based on your DB backend
+            queryset = queryset.annotate(
+                similarity=models.expressions.RawSQL(
+                    "embedding <=> %s::vector", 
+                    (query_embedding,)
+                )
+            ).order_by('similarity')[:limit]
             
-            return results
+            return queryset
             
         except Exception as e:
             logger.error(f"Error in search_by_similarity: {str(e)}")

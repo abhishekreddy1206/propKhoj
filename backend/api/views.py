@@ -1,6 +1,6 @@
 import json
+from datetime import datetime
 from django.contrib.auth import authenticate
-from django.http import JsonResponse
 from django.utils.timezone import now
 from django.conf import settings
 from django.shortcuts import get_object_or_404
@@ -8,7 +8,6 @@ from rest_framework import viewsets, status
 from rest_framework.response import Response
 from rest_framework.decorators import action
 from rest_framework.authtoken.models import Token
-from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.authentication import SessionAuthentication, TokenAuthentication
 from django.utils.decorators import method_decorator
@@ -56,16 +55,23 @@ class ChatMessageViewSet(viewsets.ModelViewSet):
             ChatMessage.objects.store_message(conversation, user, user_message, "user")
             chat_logger.info(f"User {user} sent: '{user_message}' in Conversation {conversation.id}")
 
+            # 🔍 **RAG Property Search**
+            property_results = Property.objects.search_by_similarity(user_message, limit=5)
+            property_data = PropertySerializer(property_results, many=True).data  # Serialize for frontend
+
             # Get AI response
             bot_reply = ChatMessage.objects.get_ai_response(conversation)
 
             # Store bot response
-            ChatMessage.objects.store_message(conversation, None, bot_reply, "bot")
+            bot_message = ChatMessage.objects.store_message(conversation, None, bot_reply, "bot")
+            bot_message.properties.set(property_results)
             chat_logger.info(f"AI Response: '{bot_reply}' in Conversation {conversation.id}")
 
             return Response({
                 "message": bot_reply,
-                "conversation_id": conversation.id
+                "conversation_id": conversation.id,
+                "message_id": bot_message.id,
+                "properties": property_data 
             }, status=status.HTTP_200_OK)
 
         except ValueError as e:
@@ -100,6 +106,17 @@ class ChatMessageViewSet(viewsets.ModelViewSet):
                 {"error": f"Failed to fetch sample prompts: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+    
+    @action(detail=False, methods=['post'])
+    def message_feedback(self, request, chat_id):
+        try:
+            message = ChatMessage.objects.get(id=chat_id)
+            message.feedback = request.data.get('feedback')
+            message.feedback_timestamp = datetime.now()
+            message.save()
+            return Response({'status': 'success'})
+        except ChatMessage.DoesNotExist:
+            return Response({'error': 'Message not found'}, status=404)
 
 
 class ConversationViewSet(viewsets.ModelViewSet):

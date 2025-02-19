@@ -13,4 +13,5 @@ urlpatterns = [
     path('', include(router.urls)),
     path('chats/chat/', ChatMessageViewSet.as_view({'post': 'chat'}), name="chat"),
     path('chats/sample-prompts/', ChatMessageViewSet.as_view({'get': 'sample_prompts'}), name="sample-prompts"),
+    path('chats/feedback/<int:chat_id>/', ChatMessageViewSet.as_view({'post': 'message_feedback'}), name="message-feedback"),
 ]

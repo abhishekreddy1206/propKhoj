@@ -250,7 +250,7 @@ class Property(models.Model):
     last_updated = models.DateTimeField(auto_now=True)
 
     # Vector Embedding for AI-powered search
-    embedding = VectorField(dimensions=1536, db_index=True)
+    embedding = VectorField(dimensions=1536, null=True, db_index=False)
     embedding_updated_at = models.DateTimeField(null=True, blank=True)
 
     objects = PropertyManager()
@@ -311,12 +311,20 @@ class ChatMessage(models.Model):
         ('bot', 'Bot'),
     ]
 
+    FEEDBACK_CHOICES = [
+        ('like', 'Like'),
+        ('dislike', 'Dislike'),
+        ('none', 'None')
+    ]
+
     conversation = models.ForeignKey(Conversation, on_delete=models.CASCADE, related_name="messages")
     user = models.ForeignKey(User, on_delete=models.CASCADE, null=True, blank=True)
     text = models.TextField()
     sender = models.CharField(max_length=10, choices=SENDER_CHOICES)
     timestamp = models.DateTimeField(auto_now_add=True)
     properties = models.ManyToManyField(Property, blank=True)
+    feedback = models.CharField(max_length=10, choices=FEEDBACK_CHOICES, default='none')
+    feedback_timestamp = models.DateTimeField(null=True, blank=True)
 
     objects = ChatMessageManager()
 

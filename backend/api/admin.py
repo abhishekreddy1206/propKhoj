@@ -5,6 +5,7 @@ from .models import (
     ChatMessage, Address, Amenity, Currency,
     ListingStatus, PropertyType
 )
+from .chat_analytics import ChatAnalytics
 
 
 @admin.register(User)
@@ -43,9 +44,12 @@ class PropertyAdmin(admin.ModelAdmin):
 
 @admin.register(Conversation)
 class ConversationAdmin(admin.ModelAdmin):
-    list_display = ('id', 'user', 'started_at', 'last_updated', 'status')
-    search_fields = ('id', 'user__username')
+    list_display = ('id', 'user', 'started_at', 'last_updated', 'status', 'message_count')
     list_filter = ('status', 'started_at', 'last_updated')
+    search_fields = ('user__username', 'id')
+    
+    def message_count(self, obj):
+        return obj.messages.count()
 
 
 @admin.register(ChatMessage)

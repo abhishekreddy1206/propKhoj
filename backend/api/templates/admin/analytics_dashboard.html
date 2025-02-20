@@ -1,0 +1,466 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block extra_css %}
+{{ block.super }}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/chart.js/3.9.1/chart.min.css">
+<style>
+.analytics-container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 20px;
+}
+.metrics-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    gap: 20px;
+    margin-bottom: 30px;
+}
+.metric-card {
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    padding: 20px;
+}
+.chart-container {
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    padding: 20px;
+    margin-bottom: 30px;
+    height: 400px;
+}
+.summary-box {
+    background: #f8f9fa;
+    border-left: 4px solid #007bff;
+    padding: 20px;
+    margin-bottom: 30px;
+}
+h2 {
+    margin-top: 30px;
+    margin-bottom: 20px;
+    color: #333;
+}
+.loading {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 200px;
+    font-style: italic;
+    color: #666;
+}
+#error-messages {
+    margin-bottom: 20px;
+}
+.alert {
+    padding: 15px;
+    margin-bottom: 10px;
+    border: 1px solid transparent;
+    border-radius: 4px;
+}
+.alert-danger {
+    color: #721c24;
+    background-color: #f8d7da;
+    border-color: #f5c6cb;
+}
+#api-debug {
+    background: #f8f9fa;
+    border: 1px solid #ddd;
+    padding: 15px;
+    margin-top: 30px;
+    display: none;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="analytics-container">
+  <h1>Real Estate Chat Analytics Dashboard</h1>
+  
+  <div class="time-filter">
+    <label for="time-period">Time Period: </label>
+    <select id="time-period" onchange="refreshDashboard()">
+      <option value="7">Last 7 days</option>
+      <option value="30" selected>Last 30 days</option>
+      <option value="90">Last 90 days</option>
+    </select>
+    <button onclick="toggleDebugInfo()" style="margin-left: 20px;">Toggle Debug Info</button>
+  </div>
+  
+  <div id="error-messages"></div>
+  
+  <div class="summary-box" id="ai-summary">
+    <h3>AI-Generated Insights</h3>
+    <p class="loading">Loading AI summary...</p>
+  </div>
+  
+  <h2>Conversation Metrics</h2>
+  <div class="metrics-cards" id="basic-metrics">
+    <div class="metric-card">
+      <h3>Total Conversations</h3>
+      <p class="loading">Loading...</p>
+    </div>
+    <div class="metric-card">
+      <h3>Active Conversations</h3>
+      <p class="loading">Loading...</p>
+    </div>
+    <div class="metric-card">
+      <h3>Avg Messages per Conversation</h3>
+      <p class="loading">Loading...</p>
+    </div>
+    <div class="metric-card">
+      <h3>Feedback Rate</h3>
+      <p class="loading">Loading...</p>
+    </div>
+  </div>
+  
+  <div class="row">
+    <div class="chart-container">
+      <h3>Conversations Over Time</h3>
+      <canvas id="conversations-chart"></canvas>
+    </div>
+  </div>
+  
+  <div class="row">
+    <div class="chart-container">
+      <h3>Popular Topics</h3>
+      <canvas id="topics-chart"></canvas>
+    </div>
+  </div>
+  
+  <h2>User Intent Analysis</h2>
+  <div class="chart-container">
+    <h3>User Intent Distribution</h3>
+    <canvas id="intents-chart"></canvas>
+  </div>
+  
+  <h2>Property Interest Analysis</h2>
+  <div class="chart-container" style="height: auto;">
+    <h3>Top Mentioned Properties</h3>
+    <div id="properties-table-container" style="max-height: 400px; overflow-y: auto;">
+      <table class="table" id="properties-table">
+        <thead>
+          <tr>
+            <th>Property</th>
+            <th>Type</th>
+            <th>Location</th>
+            <th>Price Range</th>
+            <th>Mentions</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td colspan="5" class="loading">Loading property data...</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  
+  <div id="api-debug">
+    <h3>API Debug Information</h3>
+    <pre id="debug-output">No debug data yet</pre>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.min.js"></script>
+<script>
+  // Dashboard configuration
+  let conversationsChart, topicsChart, intentsChart;
+  let debugData = {};
+
+  // Initialize dashboard
+  document.addEventListener('DOMContentLoaded', function() {
+    refreshDashboard();
+  });
+
+  function toggleDebugInfo() {
+    const debugElement = document.getElementById('api-debug');
+    debugElement.style.display = debugElement.style.display === 'none' ? 'block' : 'none';
+  }
+  
+  function refreshDashboard() {
+    document.getElementById('error-messages').innerHTML = '';
+    const timePeriod = document.getElementById('time-period').value;
+    fetchBasicMetrics(timePeriod);
+    fetchTopicTrends(timePeriod);
+    fetchUserIntents(timePeriod);
+    fetchPropertyInterest();
+    fetchDashboardSummary();
+  }
+
+  function debugApiCall(endpoint, data) {
+    console.log(`API Response from ${endpoint}:`, data);
+    debugData[endpoint] = data;
+    document.getElementById('debug-output').textContent = 
+      JSON.stringify(debugData, null, 2);
+  }
+
+  function fetchWithErrorHandling(url, successCallback) {
+    console.log(`Fetching from: ${url}`);
+    
+    fetch(url)
+      .then(response => {
+        if (!response.ok) {
+          throw new Error(`HTTP error! Status: ${response.status}`);
+        }
+        return response.json();
+      })
+      .then(data => {
+        debugApiCall(url, data);
+        successCallback(data);
+      })
+      .catch(error => {
+        console.error(`Error fetching from ${url}:`, error);
+        document.getElementById('error-messages').innerHTML += `
+          <div class="alert alert-danger">
+            Error loading data from ${url}: ${error.message}
+          </div>
+        `;
+      });
+  }
+  
+  // Fetch basic metrics
+  function fetchBasicMetrics(days) {
+    fetchWithErrorHandling(`/api/analytics/metrics/?days=${days}`, data => {
+      if (data) {
+        updateMetricsCards(data);
+        updateConversationsChart(data.conversations_by_day);
+      }
+    });
+  }
+  
+  // Update metrics cards with data
+  function updateMetricsCards(data) {
+    const metricsContainer = document.getElementById('basic-metrics');
+    const cards = metricsContainer.querySelectorAll('.metric-card');
+    
+    // Total conversations
+    cards[0].innerHTML = `
+      <h3>Total Conversations</h3>
+      <p class="metric-value">${data.total_conversations}</p>
+    `;
+    
+    // Active conversations
+    cards[1].innerHTML = `
+      <h3>Active Conversations</h3>
+      <p class="metric-value">${data.active_conversations}</p>
+    `;
+    
+    // Avg messages per conversation
+    cards[2].innerHTML = `
+      <h3>Avg Messages per Conversation</h3>
+      <p class="metric-value">${data.avg_messages_per_conversation?.toFixed(1) || 'N/A'}</p>
+    `;
+    
+    // Feedback metrics
+    const feedback = data.feedback_metrics || {positive_rate: 0, like_count: 0, dislike_count: 0};
+    cards[3].innerHTML = `
+      <h3>Feedback Rate</h3>
+      <p class="metric-value">${feedback.positive_rate?.toFixed(1) || 0}% Positive</p>
+      <p><small>👍 ${feedback.like_count || 0} | 👎 ${feedback.dislike_count || 0}</small></p>
+    `;
+  }
+  
+  // Update conversations chart
+  function updateConversationsChart(conversationsByDay) {
+    if (!conversationsByDay || Object.keys(conversationsByDay).length === 0) {
+      console.warn('No conversation data available for chart');
+      return;
+    }
+    
+    const ctx = document.getElementById('conversations-chart').getContext('2d');
+    
+    // Convert data for Chart.js
+    const dates = Object.keys(conversationsByDay).sort();
+    const counts = dates.map(date => conversationsByDay[date]);
+    
+    if (conversationsChart) {
+      conversationsChart.destroy();
+    }
+    
+    conversationsChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: dates,
+        datasets: [{
+          label: 'Conversations',
+          data: counts,
+          backgroundColor: 'rgba(54, 162, 235, 0.2)',
+          borderColor: 'rgba(54, 162, 235, 1)',
+          borderWidth: 2,
+          tension: 0.3
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          y: {
+            beginAtZero: true
+          }
+        }
+      }
+    });
+  }
+  
+  // Fetch topic trends
+  function fetchTopicTrends(days) {
+    fetchWithErrorHandling(`/api/analytics/topics/?days=${days}`, data => {
+      if (data && data.topic_trends) {
+        updateTopicsChart(data.topic_trends);
+      }
+    });
+  }
+  
+  // Update topics chart
+  function updateTopicsChart(topicTrends) {
+    if (!topicTrends || Object.keys(topicTrends).length === 0) {
+      console.warn('No topic data available for chart');
+      return;
+    }
+    
+    const ctx = document.getElementById('topics-chart').getContext('2d');
+    
+    // Convert data for Chart.js
+    const topics = Object.keys(topicTrends);
+    const counts = topics.map(topic => topicTrends[topic]);
+    
+    if (topicsChart) {
+      topicsChart.destroy();
+    }
+    
+    topicsChart = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: topics,
+        datasets: [{
+          label: 'Conversation Count',
+          data: counts,
+          backgroundColor: 'rgba(75, 192, 192, 0.6)',
+          borderColor: 'rgba(75, 192, 192, 1)',
+          borderWidth: 1
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          y: {
+            beginAtZero: true
+          }
+        }
+      }
+    });
+  }
+  
+  // Fetch user intents
+  function fetchUserIntents(days) {
+    fetchWithErrorHandling(`/api/analytics/intents/?days=${days}`, data => {
+      if (data && data.intent_distribution) {
+        updateIntentsChart(data);
+      }
+    });
+  }
+  
+  // Update intents chart
+  function updateIntentsChart(data) {
+    if (!data.intent_distribution || Object.keys(data.intent_distribution).length === 0) {
+      console.warn('No intent data available for chart');
+      return;
+    }
+    
+    const ctx = document.getElementById('intents-chart').getContext('2d');
+    
+    // Convert data for Chart.js
+    const intents = Object.keys(data.intent_distribution);
+    const counts = intents.map(intent => data.intent_distribution[intent]);
+    
+    if (intentsChart) {
+      intentsChart.destroy();
+    }
+    
+    intentsChart = new Chart(ctx, {
+      type: 'doughnut',
+      data: {
+        labels: intents,
+        datasets: [{
+          data: counts,
+          backgroundColor: [
+            'rgba(255, 99, 132, 0.6)',
+            'rgba(54, 162, 235, 0.6)',
+            'rgba(255, 206, 86, 0.6)',
+            'rgba(75, 192, 192, 0.6)',
+            'rgba(153, 102, 255, 0.6)',
+            'rgba(255, 159, 64, 0.6)',
+            'rgba(199, 199, 199, 0.6)',
+            'rgba(83, 102, 255, 0.6)'
+          ],
+          borderWidth: 1
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: {
+            position: 'right',
+          }
+        }
+      }
+    });
+  }
+  
+  // Fetch property interest data
+  function fetchPropertyInterest() {
+    fetchWithErrorHandling('/api/analytics/properties/', data => {
+      if (data && data.property_interest) {
+        updatePropertiesTable(data.property_interest);
+      } else {
+        // Handle empty data
+        document.querySelector('#properties-table tbody').innerHTML = 
+          '<tr><td colspan="5">No property data available</td></tr>';
+      }
+    });
+  }
+  
+  // Update properties table
+  function updatePropertiesTable(properties) {
+    const tableBody = document.querySelector('#properties-table tbody');
+    
+    if (!properties || properties.length === 0) {
+      tableBody.innerHTML = '<tr><td colspan="5">No property data available</td></tr>';
+      return;
+    }
+    
+    let tableHTML = '';
+    properties.forEach(property => {
+      tableHTML += `
+        <tr>
+          <td>${property.title || 'Unnamed'}</td>
+          <td>${property.type || 'N/A'}</td>
+          <td>${property.location || 'N/A'}</td>
+          <td>${property.price_range || 'N/A'}</td>
+          <td>${property.mention_count || 0}</td>
+        </tr>
+      `;
+    });
+    
+    tableBody.innerHTML = tableHTML;
+  }
+  
+  // Fetch AI-generated dashboard summary
+  function fetchDashboardSummary() {
+    fetchWithErrorHandling('/api/analytics/summary/', data => {
+      if (data && data.summary) {
+        document.getElementById('ai-summary').innerHTML = `
+          <h3>AI-Generated Insights</h3>
+          <p>${data.summary}</p>
+        `;
+      }
+    });
+  }
+</script>
+{% endblock %}

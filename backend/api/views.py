@@ -199,7 +199,7 @@ class UserViewSet(viewsets.ModelViewSet):
 
 
 class UserProfileView(viewsets.ViewSet):
-    # permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated]
 
     @action(detail=False, methods=['get'])
     def me(self, request):

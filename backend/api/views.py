@@ -211,7 +211,13 @@ class UserProfileView(viewsets.ViewSet):
     def update_profile(self, request):
         """Update user's profile"""
         user = request.user
-        serializer = CustomUserSerializer(user, data=request.data, partial=True)
+        data = request.data.copy()
+    
+        # If username is provided and it's the same as current username, remove it to avoid validation
+        if 'username' in data and data['username'] == user.username:
+            del data['username']
+        
+        serializer = CustomUserSerializer(user, data=data, partial=True)
 
         if serializer.is_valid():
             serializer.save(profile_completed=True)

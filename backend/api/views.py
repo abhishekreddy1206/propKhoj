@@ -89,15 +89,16 @@ class ChatMessageViewSet(viewsets.ModelViewSet):
         Generates follow-up prompts if conversation_id is provided.
         """
         conversation_id = request.query_params.get('conversation_id')
+        user = request.user if request.user.is_authenticated else None
 
         try:
             if conversation_id:
                 logger.info(f"Fetching prompts for conversation {conversation_id}")
                 conversation = get_object_or_404(Conversation, id=conversation_id, user=request.user)
-                prompts = ChatMessage.objects.get_sample_prompts(conversation)
+                prompts = ChatMessage.objects.get_sample_prompts(conversation=conversation, user=user)
             else:
                 logger.info("Fetching default prompts")
-                prompts = ChatMessage.objects.get_sample_prompts()
+                prompts = ChatMessage.objects.get_sample_prompts(user=user)
                 
             return Response({"prompts": prompts}, status=status.HTTP_200_OK)
         except Exception as e:

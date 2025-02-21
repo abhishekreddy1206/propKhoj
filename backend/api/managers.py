@@ -35,7 +35,7 @@ class ChatMessageManager(models.Manager):
         Retrieve chat history in OpenAI format.
         """
         chat_history = self.filter(conversation=conversation).order_by("timestamp")
-        formatted_messages = [{"role": "system", "content": "You are a helpful real estate AI assistant."}]
+        formatted_messages = [{"role": "system", "content": "You are a helpful real estate AI assistant. Frame your responses very concisely/professionally within 100 words."}]
 
         for msg in chat_history:
             role = "user" if msg.sender == "user" else "assistant"
@@ -59,11 +59,12 @@ class ChatMessageManager(models.Manager):
             logger.error(f"OpenAI API error: {str(e)}")
             return "I'm currently unable to fetch responses. Please try again later."
     
-    def get_sample_prompts(self, conversation=None):
+    def get_sample_prompts(self, conversation=None, user=None):
         """
         Get AI-generated sample prompts for the chat interface.
         If conversation is provided, generates follow-up prompts based on chat history.
         """
+        city = user.address.city if user and user.address else "Sacramento"
         sample_prompts = [
             "Find me a 2BHK apartment in Bangalore",
             "Show me commercial office spaces under ₹50L",
@@ -80,7 +81,8 @@ class ChatMessageManager(models.Manager):
         
         try:
             system_prompt = f"""You are a helpful real estate AI assistant. Generate 4 sample questions that users might ask about real estate. 
-            Use these as examples but not the same: {json.dumps(sample_prompts)}
+            Use these as examples but not the same: {json.dumps(sample_prompts)}.
+            Also generate these prompts for the city the user is in which is: {city}.
             Return them in this exact JSON format:
             {{
                 "prompts": [

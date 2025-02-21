@@ -8,6 +8,23 @@ from .models import (
 from .chat_analytics import ChatAnalytics
 
 
+@admin.register(Address)
+class AddressAdmin(admin.ModelAdmin):
+    list_display = ('street_address', 'unit', 'city', 'state', 'zip_code', 'latitude', 'longitude', 'is_verified')
+    search_fields = ('street_address', 'city', 'state', 'zip_code')
+    list_filter = ('state', 'is_verified')
+    ordering = ('city', 'state')
+
+    def has_add_permission(self, request):
+        return request.user.groups.filter(name__in=['Agent', 'Admin']).exists()
+
+    def has_view_permission(self, request, obj=None):
+        return request.user.groups.filter(name__in=['Agent', 'Admin']).exists()
+
+    def has_delete_permission(self, request, obj=None):
+        return request.user.groups.filter(name='Admin').exists()
+
+
 @admin.register(User)
 class CustomUserAdmin(UserAdmin):
     list_display = ('username', 'email', 'user_type', 'phone_number', 'is_active', 'is_staff')
@@ -26,7 +43,8 @@ class CustomUserAdmin(UserAdmin):
 class PropertyAdmin(admin.ModelAdmin):
     list_display = (
         'title', 'property_type', 'price', 'currency', 'availability', 
-        'address', 'bedrooms', 'bathrooms', 'size', 'building_name', 'landmark'
+        'address', 
+        'bedrooms', 'bathrooms', 'size', 'building_name', 'landmark'
     )
     search_fields = ('title', 'property_id', 'address__street_address', 'address__city')
     list_filter = ('property_type', 'currency', 'availability', 'address__state')
@@ -57,14 +75,6 @@ class ChatMessageAdmin(admin.ModelAdmin):
     list_display = ('id', 'conversation', 'user', 'sender', 'timestamp')
     search_fields = ('conversation__id', 'user__username', 'text')
     list_filter = ('sender', 'timestamp')
-
-
-@admin.register(Address)
-class AddressAdmin(admin.ModelAdmin):
-    list_display = ('street_address', 'unit', 'city', 'state', 'zip_code', 'latitude', 'longitude', 'is_verified')
-    search_fields = ('street_address', 'city', 'state', 'zip_code')
-    list_filter = ('state', 'is_verified')
-    ordering = ('city', 'state')
 
 
 @admin.register(Amenity)

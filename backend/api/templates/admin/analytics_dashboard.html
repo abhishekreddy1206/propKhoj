@@ -3,7 +3,6 @@
 
 {% block extra_css %}
 {{ block.super }}
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/chart.js/3.9.1/chart.min.css">
 <style>
 .analytics-container {
     max-width: 1200px;
@@ -165,7 +164,8 @@ h2 {
 {% endblock %}
 
 {% block extra_js %}
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/helpers.min.js"></script>
 <script>
   // Dashboard configuration
   let conversationsChart, topicsChart, intentsChart;
@@ -440,9 +440,9 @@ h2 {
       tableHTML += `
         <tr>
           <td>${property.title || 'Unnamed'}</td>
-          <td>${property.type || 'N/A'}</td>
-          <td>${property.location || 'N/A'}</td>
-          <td>${property.price_range || 'N/A'}</td>
+          <td>${property.property_type__name || 'N/A'}</td>
+          <td>${property.address__city || 'N/A'}, ${property.address__state || 'N/A'}</td>
+          <td>${property.price || 'N/A'}</td>
           <td>${property.mention_count || 0}</td>
         </tr>
       `;

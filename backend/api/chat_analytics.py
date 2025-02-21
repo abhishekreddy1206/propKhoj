@@ -153,7 +153,7 @@ class ChatAnalytics:
         # This would need to be adjusted based on your Property model structure
         # Assuming Property model has fields like 'title', 'type', 'price_range', 'location'
         top_properties = Property.objects.filter(id__in=property_ids).values(
-            'id', 'title', 'type', 'price_range', 'location'
+            'id', 'title', 'property_type__name', 'price', 'address__city', 'address__state'
         )
         
         # Map mention counts to property details

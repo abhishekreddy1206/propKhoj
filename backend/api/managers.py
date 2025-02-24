@@ -64,7 +64,7 @@ class ChatMessageManager(models.Manager):
         Get AI-generated sample prompts for the chat interface.
         If conversation is provided, generates follow-up prompts based on chat history.
         """
-        city = user.address.city if user and user.address else "Sacramento"
+        city = user.address.city if user and user.address and user.address.city else "Sacramento"
         sample_prompts = [
             "Find me a 2BHK apartment in Bangalore",
             "Show me commercial office spaces under ₹50L",

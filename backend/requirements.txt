@@ -2,33 +2,32 @@
 Django==4.2
 
 # Authentication
-django-allauth
-dj-rest-auth
+django-allauth==65.3.0
+dj-rest-auth==7.0.0
 social-auth-app-django
 
 # Django REST Framework
-djangorestframework
+djangorestframework==3.15.2
 djangorestframework-simplejwt
 
 # PostgreSQL with pgvector
 psycopg2-binary==2.9.6
-pgvector 
+pgvector==0.3.6
 
 # Environment Variables
-python-dotenv
+python-dotenv==1.0.1
 
 # CORS Handling
-django-cors-headers
+django-cors-headers==4.6.0
 
 # Logging & Monitoring
 django-extensions==3.2.3
 
 # AI & OpenAI API Support
-openai  # Ensure OpenAI client usage is compatible
-numpy>=1.24.2  # Needed for vector calculations
-pydantic>=1.10.7  # Required for OpenAI API calls
+openai==1.58.1
+numpy>=1.24.2
+pydantic>=1.10.7
 
 # Additional Utils
-gunicorn==20.1.0  # Production WSGI server
-supabase==2.12.0
-googlemaps
+gunicorn==20.1.0
+googlemaps==4.10.0

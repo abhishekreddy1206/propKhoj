@@ -1,10 +1,10 @@
-from datetime import datetime
-import logging, uuid
+import hashlib, logging, uuid
 from django.db import models
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.contrib.auth.models import AbstractUser, Group, Permission
+from django.utils import timezone
 from pgvector.django import VectorField
 from .managers import ChatMessageManager, ConversationManager, PropertyManager
 from googlemaps import Client
@@ -68,7 +68,23 @@ class Address(models.Model):
             self.is_verified = False
     
     def save(self, *args, **kwargs):
-        self.clean()
+        # Only geocode if address fields changed
+        if self.pk:
+            try:
+                old = Address.objects.get(pk=self.pk)
+                address_changed = (
+                    old.street_address != self.street_address or
+                    old.city != self.city or
+                    old.state != self.state or
+                    old.zip_code != self.zip_code
+                )
+            except Address.DoesNotExist:
+                address_changed = True
+        else:
+            address_changed = True
+
+        if address_changed:
+            self.clean()
         super().save(*args, **kwargs)
     
     def __str__(self):
@@ -252,24 +268,28 @@ class Property(models.Model):
     # Vector Embedding for AI-powered search
     embedding = VectorField(dimensions=1536, null=True, db_index=False)
     embedding_updated_at = models.DateTimeField(null=True, blank=True)
+    embedding_content_hash = models.CharField(max_length=64, blank=True, null=True)
 
     objects = PropertyManager()
     
     def save(self, *args, **kwargs):
         if self.size and self.price:
             self.price_per_sqft = self.price / self.size
-        
-        if not self.embedding:
+
+        # Smart embedding: only regenerate if content changed
+        skip_embedding = kwargs.pop('skip_embedding', False)
+        if not skip_embedding:
             try:
                 text = Property.objects.generate_property_text(self)
-                self.embedding = Property.objects.generate_embedding(text)
-                self.embedding_updated_at = datetime.now()
+                content_hash = hashlib.sha256(text.encode()).hexdigest()
+                if content_hash != self.embedding_content_hash:
+                    self.embedding = Property.objects.generate_embedding(text)
+                    self.embedding_updated_at = timezone.now()
+                    self.embedding_content_hash = content_hash
             except Exception as e:
                 logger.error(f"Error generating embedding during save: {str(e)}")
-                # If you want to allow saving without embedding in case of errors:
-                if not kwargs.get('skip_embedding'):
-                    raise
-    
+                raise
+
         super().save(*args, **kwargs)
     
     def __str__(self):

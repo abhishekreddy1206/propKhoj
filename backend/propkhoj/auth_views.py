@@ -1,6 +1,5 @@
 from django.shortcuts import redirect
 from django.conf import settings
-from django.urls import reverse
 from django.http import JsonResponse
 from rest_framework.views import APIView
 from allauth.socialaccount.providers.google.views import GoogleOAuth2Adapter
@@ -13,7 +12,7 @@ import requests
 class GoogleLoginInit(APIView):
     def get(self, request, *args, **kwargs):
         client_id = settings.SOCIALACCOUNT_PROVIDERS['google']['APP']['client_id']
-        redirect_uri = 'http://localhost:3000/login'
+        redirect_uri = settings.OAUTH_REDIRECT_URI
         scope = 'email profile'
         
         google_auth_url = f'https://accounts.google.com/o/oauth2/v2/auth?'
@@ -27,7 +26,7 @@ class GoogleLoginInit(APIView):
 class FacebookLoginInit(APIView):
     def get(self, request, *args, **kwargs):
         client_id = settings.SOCIALACCOUNT_PROVIDERS['facebook']['APP']['client_id']
-        redirect_uri = 'http://localhost:3000/login'
+        redirect_uri = settings.OAUTH_REDIRECT_URI
         scope = 'email public_profile'
         
         facebook_auth_url = f'https://www.facebook.com/v12.0/dialog/oauth?'
@@ -41,7 +40,7 @@ class FacebookLoginInit(APIView):
 class GithubLoginInit(APIView):
     def get(self, request, *args, **kwargs):
         client_id = settings.SOCIALACCOUNT_PROVIDERS['github']['APP']['client_id']
-        redirect_uri = 'http://localhost:3000/login'
+        redirect_uri = settings.OAUTH_REDIRECT_URI
         scope = 'user:email'
         
         github_auth_url = f'https://github.com/login/oauth/authorize?'
@@ -53,7 +52,7 @@ class GithubLoginInit(APIView):
 
 class GoogleLoginCallback(SocialLoginView):
     adapter_class = GoogleOAuth2Adapter
-    callback_url = 'http://localhost:3000/login'
+    callback_url = settings.OAUTH_REDIRECT_URI
     client_class = OAuth2Client
 
     def post(self, request, *args, **kwargs):
@@ -104,7 +103,7 @@ class GoogleLoginCallback(SocialLoginView):
 
 class FacebookLoginCallback(SocialLoginView):
     adapter_class = FacebookOAuth2Adapter
-    callback_url = 'http://localhost:3000/login'
+    callback_url = settings.OAUTH_REDIRECT_URI
     client_class = OAuth2Client
 
     def post(self, request, *args, **kwargs):
@@ -154,7 +153,7 @@ class FacebookLoginCallback(SocialLoginView):
 
 class GithubLoginCallback(SocialLoginView):
     adapter_class = GitHubOAuth2Adapter
-    callback_url = 'http://localhost:3000/login'
+    callback_url = settings.OAUTH_REDIRECT_URI
     client_class = OAuth2Client
 
     def post(self, request, *args, **kwargs):

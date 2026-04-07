@@ -29,9 +29,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = os.getenv('DJANGO_SECRET_KEY')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.getenv('DJANGO_DEBUG')
+DEBUG = os.getenv('DJANGO_DEBUG', 'False').lower() in ('true', '1')
 
-ALLOWED_HOSTS = ['localhost', '127.0.0.1']
+ALLOWED_HOSTS = os.getenv('DJANGO_ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
 
 
 # Application definition
@@ -71,7 +71,6 @@ MIDDLEWARE = [
     'allauth.account.middleware.AccountMiddleware',
 ]
 
-CORS_ALLOW_ALL_ORIGINS = True  # Allows all origins, useful for development
 CORS_ALLOW_METHODS = ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
 CORS_ALLOW_HEADERS = [
     "content-type",
@@ -82,20 +81,15 @@ CORS_ALLOW_HEADERS = [
     "x-requested-with",
 ]
 CORS_ALLOW_CREDENTIALS = True
-# CORS_ALLOW_HEADERS = ["*"]
-# CORS_ALLOWED_ORIGINS = [
-#     "http://localhost:3000", 
-#     "http://127.0.0.1:3000",
-# ]
+CORS_ALLOWED_ORIGINS = os.getenv('CORS_ALLOWED_ORIGINS', 'http://localhost:3000').split(',')
 
-# ✅ CSRF Protection
-CORS_ALLOW_CREDENTIALS = True
-CORS_ALLOWED_ORIGINS = ["http://localhost:3000"]  # Your React development server
-CSRF_TRUSTED_ORIGINS = ["http://localhost:3000"]
+# CSRF Protection
+CSRF_TRUSTED_ORIGINS = os.getenv('CORS_ALLOWED_ORIGINS', 'http://localhost:3000').split(',')
 CSRF_HEADER_NAME = "HTTP_X_CSRFTOKEN"
 CSRF_COOKIE_NAME = "csrftoken"
-CSRF_COOKIE_HTTPONLY = False  # ✅ Allow frontend JavaScript to read CSRF token
-CSRF_COOKIE_SECURE = False  # ✅ Set to True in production with HTTPS
+CSRF_COOKIE_HTTPONLY = False  # SPA must read CSRF cookie via JavaScript
+CSRF_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_SAMESITE = 'Lax'
 
 ROOT_URLCONF = 'propkhoj.urls'
 
@@ -193,27 +187,35 @@ LOGGING = {
     'handlers': {
         'file_app': {
             'level': 'INFO',
-            'class': 'logging.FileHandler',
+            'class': 'logging.handlers.RotatingFileHandler',
             'filename': 'logs/app.log',
             'formatter': 'detailed',
+            'maxBytes': 10 * 1024 * 1024,
+            'backupCount': 5,
         },
         'file_error': {
             'level': 'ERROR',
-            'class': 'logging.FileHandler',
+            'class': 'logging.handlers.RotatingFileHandler',
             'filename': 'logs/error.log',
             'formatter': 'detailed',
+            'maxBytes': 10 * 1024 * 1024,
+            'backupCount': 5,
         },
         'file_access': {
             'level': 'INFO',
-            'class': 'logging.FileHandler',
+            'class': 'logging.handlers.RotatingFileHandler',
             'filename': 'logs/access.log',
             'formatter': 'json',
+            'maxBytes': 10 * 1024 * 1024,
+            'backupCount': 5,
         },
         'file_chat': {
             'level': 'INFO',
-            'class': 'logging.FileHandler',
+            'class': 'logging.handlers.RotatingFileHandler',
             'filename': 'logs/chat.log',
             'formatter': 'detailed',
+            'maxBytes': 10 * 1024 * 1024,
+            'backupCount': 5,
         },
         'console': {
             'level': 'DEBUG',
@@ -265,8 +267,8 @@ ACCOUNT_EMAIL_VERIFICATION = "optional"
 SOCIALACCOUNT_PROVIDERS = {
     'google': {
         'APP': {
-            'client_id': 'your-google-client-id',
-            'secret': 'your-google-client-secret',
+            'client_id': os.getenv('GOOGLE_OAUTH_CLIENT_ID', ''),
+            'secret': os.getenv('GOOGLE_OAUTH_CLIENT_SECRET', ''),
             'key': ''
         },
         'SCOPE': [
@@ -279,8 +281,8 @@ SOCIALACCOUNT_PROVIDERS = {
     },
     'facebook': {
         'APP': {
-            'client_id': 'your-facebook-app-id',
-            'secret': 'your-facebook-app-secret',
+            'client_id': os.getenv('FACEBOOK_OAUTH_CLIENT_ID', ''),
+            'secret': os.getenv('FACEBOOK_OAUTH_CLIENT_SECRET', ''),
             'key': ''
         },
         'SCOPE': ['email', 'public_profile'],
@@ -289,8 +291,8 @@ SOCIALACCOUNT_PROVIDERS = {
     },
     'github': {
         'APP': {
-            'client_id': 'your-github-client-id',
-            'secret': 'your-github-client-secret',
+            'client_id': os.getenv('GITHUB_OAUTH_CLIENT_ID', ''),
+            'secret': os.getenv('GITHUB_OAUTH_CLIENT_SECRET', ''),
             'key': ''
         },
         'SCOPE': ['user:email']
@@ -298,3 +300,25 @@ SOCIALACCOUNT_PROVIDERS = {
 }
 
 GOOGLE_MAPS_API_KEY = os.getenv('GOOGLE_MAPS_API_KEY')
+
+OAUTH_REDIRECT_URI = os.getenv('OAUTH_REDIRECT_URI', 'http://localhost:3000/login')
+
+# Security headers
+SECURE_CONTENT_TYPE_NOSNIFF = True
+X_FRAME_OPTIONS = 'DENY'
+SECURE_BROWSER_XSS_FILTER = True
+
+if not DEBUG:
+    SECURE_HSTS_SECONDS = 31536000
+    SECURE_SSL_REDIRECT = True
+
+# Rate limiting
+REST_FRAMEWORK = {
+    'DEFAULT_THROTTLE_CLASSES': [
+        'rest_framework.throttling.ScopedRateThrottle',
+    ],
+    'DEFAULT_THROTTLE_RATES': {
+        'chat': '60/hour',
+        'login': '10/minute',
+    }
+}

@@ -1,5 +1,6 @@
 from datetime import timezone
 from django.db import models
+from django.core.cache import cache
 from openai import OpenAI
 import logging, json
 from .models import *
@@ -7,7 +8,14 @@ from .models import *
 logger = logging.getLogger('django')
 chat_logger = logging.getLogger('chat')
 
-client = OpenAI()
+_openai_client = None
+
+
+def get_openai_client():
+    global _openai_client
+    if _openai_client is None:
+        _openai_client = OpenAI()
+    return _openai_client
 
 
 class ConversationManager(models.Manager):
@@ -23,6 +31,26 @@ class ConversationManager(models.Manager):
         return self.create(user=user)
 
 
+SYSTEM_PROMPT = """You are PropKhoj, an expert real estate AI assistant. Your role is to help users find and understand properties.
+
+When property data is provided to you:
+- Reference specific properties by name, price, and location
+- Compare properties when the user asks
+- Highlight key features relevant to the user's stated preferences
+- Provide honest assessments including potential drawbacks
+
+When no property data is available:
+- Provide general real estate advice
+- Ask clarifying questions about the user's needs (budget, location, property type, bedrooms)
+
+Response guidelines:
+- Be conversational but professional
+- Use markdown formatting for readability (bold for property names, bullet lists for features)
+- Keep responses under 300 words unless the user asks for detailed comparisons
+- Always suggest next steps (schedule a visit, compare with another property, etc.)
+"""
+
+
 class ChatMessageManager(models.Manager):
     def store_message(self, conversation, user, text, sender):
         """
@@ -35,7 +63,7 @@ class ChatMessageManager(models.Manager):
         Retrieve chat history in OpenAI format.
         """
         chat_history = self.filter(conversation=conversation).order_by("timestamp")
-        formatted_messages = [{"role": "system", "content": "You are a helpful real estate AI assistant. Frame your responses very concisely/professionally within 100 words."}]
+        formatted_messages = [{"role": "system", "content": SYSTEM_PROMPT}]
 
         for msg in chat_history:
             role = "user" if msg.sender == "user" else "assistant"
@@ -43,14 +71,24 @@ class ChatMessageManager(models.Manager):
 
         return formatted_messages
 
-    def get_ai_response(self, conversation):
+    def get_ai_response(self, conversation, property_context=None):
         """
         Call OpenAI API and return a response.
+        Optionally injects property search results into the conversation context.
         """
         messages = self.get_chat_history(conversation)
 
+        if property_context:
+            context_text = "Here are relevant properties from our database matching the user's query:\n\n"
+            for i, prop_text in enumerate(property_context, 1):
+                context_text += f"{i}. {prop_text}\n\n"
+            context_text += "Use these properties in your response. Reference them by name and provide specific details. If none match well, say so and ask clarifying questions."
+
+            # Insert property context just before the last user message
+            messages.insert(-1, {"role": "system", "content": context_text})
+
         try:
-            response = client.chat.completions.create(
+            response = get_openai_client().chat.completions.create(
                 model="gpt-4o-mini",
                 messages=messages
             )
@@ -58,7 +96,7 @@ class ChatMessageManager(models.Manager):
         except Exception as e:
             logger.error(f"OpenAI API error: {str(e)}")
             return "I'm currently unable to fetch responses. Please try again later."
-    
+
     def get_sample_prompts(self, conversation=None, user=None):
         """
         Get AI-generated sample prompts for the chat interface.
@@ -71,16 +109,23 @@ class ChatMessageManager(models.Manager):
             "What are the best areas to invest in Mumbai?",
             "List luxury villas in Delhi"
         ]
-        
+
         sample_prompts_followup = [
             "Can you tell me more about the property?",
             "What are the nearby amenities?",
             "How is the connectivity to the city center?",
             "What are the payment terms?"
         ]
-        
+
+        # Check cache for default prompts (no conversation)
+        if not conversation:
+            cache_key = f"sample_prompts_{city}"
+            cached = cache.get(cache_key)
+            if cached:
+                return cached
+
         try:
-            system_prompt = f"""You are a helpful real estate AI assistant. Generate 4 sample questions that users might ask about real estate. 
+            system_prompt = f"""You are a helpful real estate AI assistant. Generate 4 sample questions that users might ask about real estate.
             Use these as examples but not the same: {json.dumps(sample_prompts)}.
             Also generate these prompts for the city the user is in which is: {city}.
             Return them in this exact JSON format:
@@ -92,7 +137,7 @@ class ChatMessageManager(models.Manager):
                     "question 4"
                 ]
             }}"""
-            
+
             if not conversation:
                 messages = [
                     {"role": "system", "content": system_prompt},
@@ -103,25 +148,31 @@ class ChatMessageManager(models.Manager):
                 messages = [
                     {"role": "system", "content": system_prompt},
                     *chat_history[1:],
-                    {"role": "user", 
-                     "content": f"""Based on this conversation, what are 4 relevant follow-up questions I might want to ask? 
+                    {"role": "user",
+                     "content": f"""Based on this conversation, what are 4 relevant follow-up questions I might want to ask?
                                     Use these as examples but not the same: {json.dumps(sample_prompts_followup)}"""}
                 ]
 
-            logger.info(f"Sending messages to OpenAI: {json.dumps(messages)}")
-            
-            response = client.chat.completions.create(
+            logger.info(f"Sending {len(messages)} messages to OpenAI for sample prompts")
+
+            response = get_openai_client().chat.completions.create(
                 model="gpt-4o-mini",
                 messages=messages,
                 response_format={"type": "json_object"}
             )
-            
+
             content = response.choices[0].message.content
-            logger.info(f"OpenAI response content: {content}")
-            
+            logger.info(f"OpenAI sample prompts response received ({len(content)} chars)")
+
             prompts = json.loads(content)
-            return prompts.get("prompts", [])
-            
+            result = prompts.get("prompts", [])
+
+            # Cache default prompts for 1 hour
+            if not conversation:
+                cache.set(cache_key, result, timeout=3600)
+
+            return result
+
         except Exception as e:
             logger.error(f"Error in get_sample_prompts: {str(e)}", exc_info=True)
             # Return fallback prompts
@@ -134,8 +185,8 @@ class PropertyManager(models.Manager):
         Generate OpenAI embedding for given text
         """
         try:
-            response = client.embeddings.create(
-                model="text-embedding-ada-002",
+            response = get_openai_client().embeddings.create(
+                model="text-embedding-3-small",
                 input=text
             )
             return list(response.data[0].embedding)
@@ -145,47 +196,67 @@ class PropertyManager(models.Manager):
 
     def generate_property_text(self, property_instance):
         """
-        Generate searchable text from property instance
+        Generate semantically rich text from property instance for embeddings and RAG context.
         """
-        texts = [
-            property_instance.title,
-            property_instance.description,
-            f"Property type: {property_instance.property_type.name}",
-            f"Location: {property_instance.address.city}, {property_instance.address.state}",
-            f"Price: {property_instance.price} {property_instance.currency.code}",
-        ]
+        parts = []
 
-        # Add optional fields
-        optional_fields = {
-            'bedrooms': 'bedrooms',
-            'bathrooms': 'bathrooms',
-            'size': 'square feet',
-            'building_name': 'Building',
-            'landmark': 'Landmark'
-        }
+        # Title and description
+        if property_instance.title:
+            parts.append(property_instance.title)
+        if property_instance.description:
+            parts.append(property_instance.description)
 
-        for field, suffix in optional_fields.items():
-            value = getattr(property_instance, field)
-            if value:
-                texts.append(f"{field.replace('_', ' ').title()}: {value} {suffix}")
+        # Natural language summary
+        try:
+            summary = f"This is a {property_instance.property_type.name}"
+            if property_instance.bedrooms:
+                summary += f" with {property_instance.bedrooms} bedrooms"
+            if property_instance.bathrooms:
+                summary += f" and {property_instance.bathrooms} bathrooms"
+            if property_instance.address:
+                summary += f" located in {property_instance.address.city}, {property_instance.address.state}"
+                if property_instance.address.zip_code:
+                    summary += f" (ZIP: {property_instance.address.zip_code})"
+            summary += f". Listed at {property_instance.price} {property_instance.currency.code}"
+            if property_instance.price_type != 'one_time':
+                summary += f" ({property_instance.price_type})"
+            parts.append(summary)
+        except Exception:
+            pass
 
-        # Add amenities (handling as JSON array)
-        if property_instance.amenities:
-            if isinstance(property_instance.amenities, list):
-                amenity_text = ", ".join(property_instance.amenities)
-                texts.append(f"Amenities: {amenity_text}")
+        # Size info
+        if property_instance.size:
+            parts.append(f"Total area: {property_instance.size} sq ft")
+            if property_instance.price_per_sqft:
+                parts.append(f"Price per sq ft: {property_instance.price_per_sqft}")
 
-        # Add furnishing details if present
+        # Features
+        if property_instance.furnished:
+            parts.append("This property is furnished")
+        if property_instance.year_built:
+            parts.append(f"Built in {property_instance.year_built}")
+        if property_instance.parking_spaces:
+            parts.append(f"{property_instance.parking_spaces} parking spaces")
+        if property_instance.building_name:
+            parts.append(f"Located in {property_instance.building_name}")
+        if property_instance.landmark:
+            parts.append(f"Near {property_instance.landmark}")
+
+        # Amenities
+        if property_instance.amenities and isinstance(property_instance.amenities, list):
+            parts.append(f"Amenities include: {', '.join(property_instance.amenities)}")
+
+        # Furnishing details
         if property_instance.furnishing_details:
-            if isinstance(property_instance.furnishing_details.get('details', []), list):
-                furnishing_text = ", ".join(property_instance.furnishing_details.get('details', []))
-                texts.append(f"Furnishing: {furnishing_text}")
+            details = property_instance.furnishing_details.get('details', [])
+            if isinstance(details, list) and details:
+                parts.append(f"Furnishing: {', '.join(details)}")
 
-        # Add tags
+        # Tags
         if property_instance.tags and isinstance(property_instance.tags, list):
-            texts.append("Tags: " + ", ".join(property_instance.tags))
+            parts.append(f"Tags: {', '.join(property_instance.tags)}")
 
-        return " ".join(filter(None, texts))
+        return ". ".join(filter(None, parts))
 
     def update_embedding(self, property_instance):
         """
@@ -194,14 +265,14 @@ class PropertyManager(models.Manager):
         try:
             text = self.generate_property_text(property_instance)
             embedding = self.generate_embedding(text)
-            
+
             property_instance.embedding = embedding
             property_instance.embedding_updated_at = timezone.now()
             property_instance.save(update_fields=['embedding', 'embedding_updated_at'])
-            
+
             logger.info(f"Successfully updated embedding for property {property_instance.property_id}")
             return True
-            
+
         except Exception as e:
             logger.error(f"Error updating embedding for property {property_instance.property_id}: {str(e)}")
             return False
@@ -212,27 +283,79 @@ class PropertyManager(models.Manager):
         """
         try:
             query_embedding = self.generate_embedding(query)
-            
+
             # Start with base query
             queryset = self.get_queryset()
-            
+
             # Apply any additional filters
             if filters:
                 queryset = queryset.filter(**filters)
-            
+
             # Use the correct vector comparison syntax based on your DB backend
             queryset = queryset.annotate(
                 similarity=models.expressions.RawSQL(
-                    "embedding <=> %s::vector", 
+                    "embedding <=> %s::vector",
                     (query_embedding,)
                 )
             ).order_by('similarity')[:limit]
-            
+
             return queryset
-            
+
         except Exception as e:
             logger.error(f"Error in search_by_similarity: {str(e)}")
             raise
+
+    def extract_search_filters(self, query):
+        """
+        Use OpenAI function calling to extract structured filters from natural language query.
+        Falls back to empty filters on failure.
+        """
+        try:
+            response = get_openai_client().chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "Extract real estate search filters from the user query. Only include filters that are clearly stated."},
+                    {"role": "user", "content": query}
+                ],
+                tools=[{
+                    "type": "function",
+                    "function": {
+                        "name": "search_properties",
+                        "description": "Search for properties with filters",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "min_price": {"type": "number", "description": "Minimum price"},
+                                "max_price": {"type": "number", "description": "Maximum price"},
+                                "bedrooms": {"type": "integer", "description": "Number of bedrooms"},
+                                "city": {"type": "string", "description": "City name"},
+                                "property_type": {"type": "string", "description": "Type of property"},
+                            }
+                        }
+                    }
+                }],
+                tool_choice="auto",
+                max_tokens=100
+            )
+
+            if response.choices[0].message.tool_calls:
+                args = json.loads(response.choices[0].message.tool_calls[0].function.arguments)
+                django_filters = {}
+                if 'min_price' in args and args['min_price']:
+                    django_filters['price__gte'] = args['min_price']
+                if 'max_price' in args and args['max_price']:
+                    django_filters['price__lte'] = args['max_price']
+                if 'bedrooms' in args and args['bedrooms']:
+                    django_filters['bedrooms'] = args['bedrooms']
+                if 'city' in args and args['city']:
+                    django_filters['address__city__icontains'] = args['city']
+                return django_filters
+
+            return {}
+
+        except Exception as e:
+            logger.error(f"Error extracting search filters: {str(e)}")
+            return {}
 
     def bulk_update_embeddings(self, queryset=None):
         """

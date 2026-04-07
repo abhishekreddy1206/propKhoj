@@ -11,7 +11,7 @@ from .models import (
 
 class ChatAnalytics:
     def __init__(self, client=None):
-        self.client = OpenAI()  
+        self.client = client or OpenAI()
     
     def get_basic_metrics(self, time_period=30):
         """Get basic conversation metrics for the specified time period (days)"""
@@ -35,21 +35,25 @@ class ChatAnalytics:
     
     def _calculate_avg_response_time(self, cutoff_date):
         """Calculate average response time between user message and bot response"""
-        # This is a simplified version - a more accurate implementation would match each user 
-        # message with its corresponding bot response
-        user_msgs = ChatMessage.objects.filter(
-            sender='user', 
-            timestamp__gte=cutoff_date
-        ).order_by('conversation', 'timestamp')
-        
-        bot_msgs = ChatMessage.objects.filter(
-            sender='bot',
-            timestamp__gte=cutoff_date
-        ).order_by('conversation', 'timestamp')
-        
-        # Implementing this properly would require pairing user and bot messages
-        # This is a simplified placeholder
-        return 2.5  # Example: 2.5 seconds average response time
+        conversations = Conversation.objects.filter(started_at__gte=cutoff_date)
+
+        total_delta = timedelta()
+        pair_count = 0
+
+        for conv in conversations[:50]:
+            messages = list(
+                ChatMessage.objects.filter(conversation=conv, timestamp__gte=cutoff_date)
+                .order_by('timestamp')
+                .values_list('sender', 'timestamp')
+            )
+            for i in range(len(messages) - 1):
+                if messages[i][0] == 'user' and messages[i + 1][0] == 'bot':
+                    total_delta += messages[i + 1][1] - messages[i][1]
+                    pair_count += 1
+
+        if pair_count == 0:
+            return 0
+        return round(total_delta.total_seconds() / pair_count, 2)
     
     def _calculate_feedback_metrics(self, cutoff_date):
         """Calculate feedback metrics for bot responses"""

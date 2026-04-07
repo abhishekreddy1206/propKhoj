@@ -9,9 +9,9 @@ propKhoj is an AI-powered real estate property search platform that combines con
 ```
 frontend/          React 19 + TypeScript + Tailwind CSS (CRA)
 backend/           Django 4.2 REST API
-  api/             Core app: models, views, serializers, managers, analytics
+  api/             Core app: models, views, serializers, managers, analytics, tests
   propkhoj/        Django project settings, root URL config, auth views
-docker-compose.base.yml   Orchestrates backend (port 8000) and frontend (port 3000)
+docker-compose.base.yml   Orchestrates backend (port 8000) and frontend (port 3000/80)
 ```
 
 ### Tech Stack
@@ -21,11 +21,10 @@ docker-compose.base.yml   Orchestrates backend (port 8000) and frontend (port 30
 | Frontend     | React 19, TypeScript, Tailwind CSS, Framer Motion, Axios    |
 | Backend      | Django 4.2, Django REST Framework, dj-rest-auth, allauth    |
 | Database     | PostgreSQL with pgvector extension                          |
-| AI           | OpenAI API (gpt-4o-mini for chat, text-embedding-ada-002 for embeddings) |
+| AI           | OpenAI API (gpt-4o-mini for chat, text-embedding-3-small for embeddings) |
 | Auth         | Token auth, social OAuth (Google, Facebook, GitHub)         |
-| Storage      | Supabase (property images)                                  |
 | Geocoding    | Google Maps Geocoding API                                   |
-| Server       | Gunicorn (production), Nginx (frontend static serving)      |
+| Server       | Gunicorn (backend), Nginx (frontend static serving + API proxy) |
 
 ### Data Models
 
@@ -33,8 +32,8 @@ docker-compose.base.yml   Orchestrates backend (port 8000) and frontend (port 30
 |-----------------|---------------------------------------------------------------|
 | User            | Extended AbstractUser with user_type (buyer/seller/admin/agent), phone, address, profile image |
 | Address         | Geocoded address with Google Maps verification, lat/lng       |
-| Property        | Core listing: pricing, details, area, amenities, 1536-dim vector embedding for similarity search |
-| PropertyImage   | Image records stored in Supabase with type/ordering           |
+| Property        | Core listing: pricing, details, area, amenities, 1536-dim vector embedding, content hash for smart re-embedding |
+| PropertyImage   | Image records with type/ordering                              |
 | PropertyType    | Lookup table for property categories                          |
 | ListingStatus   | Lookup table for listing states                               |
 | Currency        | Multi-currency support                                        |
@@ -52,16 +51,16 @@ docker-compose.base.yml   Orchestrates backend (port 8000) and frontend (port 30
 - `POST /auth/{provider}/callback/` -- complete social OAuth
 
 **Properties** (prefix: `/api/properties/`)
-- Standard CRUD via DRF ModelViewSet
-- `GET /api/properties/search/?q=` -- text-based property search
+- Standard CRUD via DRF ModelViewSet (read: public, write: authenticated)
+- `GET /api/properties/search/?q=` -- text-based property search (title, city, state, zip)
 
 **Chat** (prefix: `/api/chats/`)
-- `POST /api/chats/chat/` -- send message, get AI response with RAG property results
+- `POST /api/chats/chat/` -- send message, get AI response with hybrid RAG property results
 - `GET /api/chats/sample-prompts/` -- AI-generated sample prompts (optional `conversation_id`)
 - `POST /api/chats/feedback/<chat_id>/` -- submit like/dislike feedback on a bot message
 
 **Conversations** (prefix: `/api/conversations/`)
-- Standard CRUD via DRF ModelViewSet
+- Standard CRUD via DRF ModelViewSet (scoped to authenticated user)
 
 **Users & Profile** (prefix: `/api/`)
 - `/api/users/` -- user CRUD, login, `/me` endpoint
@@ -90,17 +89,20 @@ docker-compose.base.yml   Orchestrates backend (port 8000) and frontend (port 30
 
 ### Key Workflows
 
-**Chat with RAG Search:**
-1. User sends a message via `POST /api/chats/chat/`
-2. Backend generates an embedding of the query using OpenAI text-embedding-ada-002
-3. pgvector cosine-distance search finds the top 5 similar properties
-4. Full conversation history + system prompt are sent to gpt-4o-mini
-5. Bot response and matching properties are returned to the frontend
+**Chat with Hybrid RAG Search:**
+1. User sends a message via `POST /api/chats/chat/` (max 5000 characters, rate-limited to 60/hour)
+2. Backend uses OpenAI function calling to extract structured filters (price range, bedrooms, city, property type) from the query
+3. Backend generates an embedding of the query using text-embedding-3-small
+4. pgvector cosine-distance search finds the top 5 similar properties, further filtered by the extracted structured filters
+5. Property text representations are injected as context into the conversation
+6. Full conversation history + system prompt + property context are sent to gpt-4o-mini
+7. Bot response and serialized matching properties are returned to the frontend
 
 **Property Embedding Generation:**
-- On `Property.save()`, a text representation is built from title, description, type, location, price, amenities, and tags
-- An embedding is generated via OpenAI and stored in the 1536-dimension vector field
-- Bulk embedding updates are available via `PropertyManager.bulk_update_embeddings()`
+- On `Property.save()`, a text representation is built from title, description, type, location, price, amenities, tags, and more
+- A SHA-256 content hash is computed; the embedding is only regenerated if the hash has changed
+- Embeddings are generated via OpenAI text-embedding-3-small (1536 dimensions)
+- Bulk re-embedding available via `python manage.py regenerate_embeddings` (supports `--force` and `--batch-size` flags)
 
 ## Getting Started
 
@@ -114,11 +116,16 @@ docker-compose.base.yml   Orchestrates backend (port 8000) and frontend (port 30
 The backend requires the following variables in `backend/.env`:
 - `DJANGO_SECRET_KEY` -- Django secret key
 - `DJANGO_DEBUG` -- debug mode flag
+- `DJANGO_ALLOWED_HOSTS` -- comma-separated allowed hostnames
 - `DATABASE_URL` -- PostgreSQL connection string (must have pgvector extension)
 - `OPENAI_API_KEY` -- OpenAI API key
 - `GOOGLE_MAPS_API_KEY` -- Google Maps Geocoding API key
+- `CORS_ALLOWED_ORIGINS` -- comma-separated allowed CORS/CSRF origins
+- `OAUTH_REDIRECT_URI` -- OAuth callback redirect URL
 - Social OAuth credentials (Google, Facebook, GitHub client IDs and secrets)
-- Supabase credentials (for image storage)
+
+The frontend requires:
+- `REACT_APP_API_URL` -- backend API base URL (defaults to `http://localhost:8000`)
 
 ### Setup
 
@@ -135,8 +142,9 @@ The backend requires the following variables in `backend/.env`:
    ```
 
    This starts:
-   - Backend on port **8000** (runs migrations automatically, then starts Django dev server)
-   - Frontend on port **3000** (Nginx serving the built React app)
+   - Backend on port **8000** (runs migrations automatically, then starts Gunicorn with 3 workers)
+   - Frontend on port **3000** (Nginx serving the built React app with SPA fallback and API proxy)
+   - Health checks run on both services
 
 3. **Access the Django shell**
 
@@ -149,6 +157,13 @@ The backend requires the following variables in `backend/.env`:
 
    ```bash
    docker-compose -f docker-compose.base.yml run backend python manage.py add_sample_listings
+   ```
+
+5. **Regenerate property embeddings**
+
+   ```bash
+   docker-compose -f docker-compose.base.yml run backend python manage.py regenerate_embeddings
+   # Use --force to regenerate all, --batch-size N to control batch size
    ```
 
 ### Local Development (without Docker)
@@ -169,9 +184,33 @@ npm install
 npm start
 ```
 
+### Running Tests
+
+**Backend:**
+```bash
+cd backend
+python manage.py test api
+```
+
+**Frontend:**
+```bash
+cd frontend
+npm test
+```
+
+## Security
+
+- CORS and CSRF origins are environment-driven (not hardcoded)
+- Permission classes enforced on all viewsets (IsAuthenticated for chat/conversations/profile, IsAuthenticatedOrReadOnly for properties)
+- Rate throttling via DRF ScopedRateThrottle (60 chat messages/hour, 10 login attempts/minute)
+- Embedding vectors excluded from API serializer responses
+- Message length validation (5000 character limit)
+- Security headers enabled (HSTS, X-Frame-Options DENY, XSS filter, content-type nosniff)
+- CSRF cookie is Secure in production, SameSite=Lax
+
 ## Logging
 
-Logs are written to `backend/logs/`:
+Logs are written to `backend/logs/` using RotatingFileHandler (10 MB per file, 5 backups):
 - `app.log` -- general application logs
 - `error.log` -- error-level logs
 - `access.log` -- HTTP request access logs (JSON format)

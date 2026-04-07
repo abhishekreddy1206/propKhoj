@@ -10,39 +10,42 @@ propKhoj is an AI-powered real estate search platform. Users chat with an AI ass
 propKhoj/
   backend/                   Django 4.2 project (Python 3.10)
     propkhoj/                Django project config
-      settings.py            Settings (env-driven), DB, logging, auth backends
+      settings.py            Settings (env-driven), DB, logging, auth backends, rate limiting, security headers
       urls.py                Root URL config: auth, social login, API include
       auth_views.py          Social OAuth init/callback views (Google, Facebook, GitHub)
     api/                     Main Django app
       models.py              Data models: User, Address, Property, Conversation, ChatMessage, etc.
-      managers.py            Custom managers: embedding generation, vector search, chat history, AI responses
-      views.py               DRF ViewSets: Property, Chat, Conversation, User, Profile
-      serializers.py         DRF serializers for all models
+      managers.py            Custom managers: embedding generation, hybrid vector search, chat history, AI responses
+      views.py               DRF ViewSets: Property, Chat, Conversation, User, Profile (with permission classes and throttling)
+      serializers.py         DRF serializers (embedding excluded from Property API responses)
       urls.py                API URL routing (router + manual paths)
       admin.py               Django admin registration with group-based permissions
       middleware.py           Access logging middleware
       analytics_views.py     Admin-only analytics API endpoints
       chat_analytics.py      ChatAnalytics class: metrics, topic trends, intent clustering, summaries
+      tests.py               Test suite: chat, conversations, property search, serializers, managers, profile, permissions
       management/commands/
-        add_sample_listings.py  Management command to seed sample property data
-        wait_for_db.py          Management command to wait for DB readiness
+        add_sample_listings.py     Management command to seed sample property data
+        wait_for_db.py             Management command to wait for DB readiness
+        regenerate_embeddings.py   Batch re-embed properties (supports --force and --batch-size)
       templates/admin/       Analytics dashboard HTML template
-    requirements.txt         Python dependencies
+    requirements.txt         Pinned Python dependencies
     Dockerfile               Python 3.10 + gunicorn
   frontend/                  React 19 + TypeScript (Create React App)
     src/
       App.tsx                Router: public, protected, admin-only routes
-      components/            ChatBot, Navbar, PropertyCard, PropertyList, FormattedMessage, etc.
-      pages/                 HomePage, LoginPage, RegisterPage, FeaturesPage, ProfilePage, AdminDashboard
+      config/api.ts          Centralized API endpoint configuration (reads REACT_APP_API_URL)
+      components/            ChatBot, Navbar (mobile-responsive), PropertyCard, PropertyList, FormattedMessage, etc.
+      pages/                 HomePage, LoginPage, RegisterPage, FeaturesPage, ProfilePage, AdminDashboard (connected to real analytics API)
       context/               AuthContext (token + social login state), ThemeContext (dark mode)
-      types/                 TypeScript interfaces (Auth, Property)
-      api/                   Property service (currently uses mock data)
+      types/                 TypeScript interfaces (Auth, Property -- aligned with backend schema)
+      api/                   Property service
       css/                   Additional stylesheets
-    Dockerfile               Node 20 build + Nginx static serving
+    nginx.conf               Nginx config: SPA fallback, API/auth proxy to backend, static asset caching
+    Dockerfile               Node 20 multi-stage build + Nginx static serving
     tailwind.config.js       Tailwind CSS config
     package.json             npm dependencies and scripts
-  docker-compose.base.yml    Orchestrates backend (8000) + frontend (3000)
-  kaggle/                    Kaggle integration config (gitignored)
+  docker-compose.base.yml    Orchestrates backend (8000) + frontend (3000/80) with health checks
 ```
 
 ## Key Commands
@@ -62,6 +65,12 @@ docker-compose -f docker-compose.base.yml run backend python manage.py migrate
 # Seed sample property listings
 docker-compose -f docker-compose.base.yml run backend python manage.py add_sample_listings
 
+# Regenerate property embeddings (--force to ignore content hash, --batch-size N)
+docker-compose -f docker-compose.base.yml run backend python manage.py regenerate_embeddings
+
+# Run backend tests
+cd backend && python manage.py test api
+
 # Local backend dev (no Docker)
 cd backend && source venv/bin/activate && pip install -r requirements.txt
 python manage.py migrate && python manage.py runserver
@@ -76,16 +85,28 @@ cd frontend && npm test
 ## Architecture Notes
 
 ### AI/RAG Pipeline
-- Property embeddings are 1536-dimension vectors generated by OpenAI text-embedding-ada-002
+- Property embeddings are 1536-dimension vectors generated by OpenAI text-embedding-3-small
 - Embeddings are auto-generated on `Property.save()` via `PropertyManager`
-- Chat queries are embedded and compared via pgvector cosine distance (`<=>` operator)
-- Top 5 similar properties are retrieved and included in the chat response
+- Smart re-embedding: a SHA-256 content hash is stored; embeddings are only regenerated when property content actually changes
+- Chat queries undergo hybrid search: OpenAI function calling extracts structured filters (price, bedrooms, city, type) which are combined with pgvector cosine-distance similarity search
+- Top 5 matching properties are serialized and their text representations injected into the AI conversation context
 - Chat responses use gpt-4o-mini with full conversation history as context
 - Sample prompts are AI-generated and city-aware based on user profile
+- Batch re-embedding via `regenerate_embeddings` management command with `--force` and `--batch-size` options
+
+### Security
+- CORS and CSRF origins are env-driven via `CORS_ALLOWED_ORIGINS`
+- Permission classes on all viewsets: `IsAuthenticated` for chat/conversations/profile, `IsAuthenticatedOrReadOnly` for properties
+- Rate throttling: 60 chat messages/hour, 10 login attempts/minute (DRF `ScopedRateThrottle`)
+- Embedding vectors excluded from API responses (`PropertySerializer` uses `exclude`)
+- Message length validation (5000 character max)
+- Security headers: HSTS (production), X-Frame-Options DENY, XSS filter, content-type nosniff
+- CSRF cookie: HttpOnly=False (SPA reads it), Secure in production, SameSite=Lax
 
 ### Authentication
 - Token-based auth via DRF TokenAuthentication + SessionAuthentication
 - Social OAuth flows for Google, Facebook, GitHub (init redirect + callback token exchange)
+- OAuth credentials and redirect URI are env-driven
 - CSRF protection enabled; frontend reads CSRF cookie and sends via X-CSRFToken header
 
 ### Database
@@ -94,14 +115,39 @@ cd frontend && npm test
 - Custom User model extends AbstractUser (set via `AUTH_USER_MODEL = 'api.User'`)
 - Address geocoding via Google Maps API on save
 
+### Frontend
+- Centralized API config in `src/config/api.ts` (reads `REACT_APP_API_URL` env var)
+- Property TypeScript types aligned with backend serializer schema
+- Mobile-responsive navbar
+- AdminDashboard connected to real analytics API endpoints
+- Nginx serves the SPA with `try_files` fallback and proxies `/api/` and `/auth/` to the backend
+
 ### Admin Analytics
 - Staff-only analytics dashboard with AI-powered insights
 - Conversation metrics, topic trends, property interest, user intent clustering
 - All analytics views use OpenAI gpt-4o-mini for analysis
 
+### Infrastructure
+- Docker Compose orchestrates backend and frontend with health checks
+- Backend: Gunicorn with 3 workers, migrations run on startup
+- Frontend: multi-stage Node 20 build, Nginx with SPA routing and static asset caching
+- RotatingFileHandler for all log files (10 MB max, 5 backups)
+
 ### Logging
 - Four log files in `backend/logs/`: app.log, error.log, access.log (JSON), chat.log
+- All handlers use RotatingFileHandler (10 MB per file, 5 backups)
 - Custom AccessLoggingMiddleware logs every request with user and status
+
+### Testing
+- Backend test suite in `api/tests.py` covering:
+  - Chat endpoint: auth, validation, AI response integration
+  - Conversation access: user isolation, auth enforcement
+  - Property search: city/title search, missing query handling
+  - Property serializer: embedding exclusion from API output
+  - Property manager: text generation, embedding generation
+  - Profile: update flow, auth requirement
+  - ViewSet permissions: read vs. write access control
+- Tests mock OpenAI calls and address geocoding to run without external services
 
 ## Coding Conventions
 
@@ -111,16 +157,20 @@ cd frontend && npm test
 - Models use UUIDs for property_id and image IDs
 - Managers encapsulate OpenAI API calls and vector operations (not in views)
 - Admin permissions are group-based (Agent, Admin groups)
+- Dependencies are pinned in requirements.txt and package.json
 
 ## Environment Variables
 
 All secrets are loaded from `backend/.env` via python-dotenv. Required variables:
 - `DJANGO_SECRET_KEY`
 - `DJANGO_DEBUG`
+- `DJANGO_ALLOWED_HOSTS` (comma-separated, defaults to localhost)
 - `DATABASE_URL` (PostgreSQL with pgvector)
 - `OPENAI_API_KEY`
 - `GOOGLE_MAPS_API_KEY`
-- Social OAuth provider credentials (configured in settings.py SOCIALACCOUNT_PROVIDERS)
-- Supabase credentials (for property image storage)
+- `CORS_ALLOWED_ORIGINS` (comma-separated, used for both CORS and CSRF trusted origins)
+- `OAUTH_REDIRECT_URI` (defaults to http://localhost:3000/login)
+- Social OAuth provider credentials (Google, Facebook, GitHub client IDs and secrets)
 
-Frontend environment is configured via `frontend/.env`.
+Frontend environment is configured via `frontend/.env`:
+- `REACT_APP_API_URL` (backend API base URL, defaults to http://localhost:8000)

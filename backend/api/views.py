@@ -59,16 +59,31 @@ class ChatMessageViewSet(viewsets.ModelViewSet):
             ChatMessage.objects.store_message(conversation, user, user_message, "user")
             chat_logger.info(f"User {user} sent: '{user_message}' in Conversation {conversation.id}")
 
-            # 🔍 **RAG Property Search with hybrid filters**
-            filters = Property.objects.extract_search_filters(user_message)
-            property_results = Property.objects.search_by_similarity(user_message, limit=5, filters=filters)
-            property_data = PropertySerializer(property_results, many=True).data
-
-            # Generate property text for RAG context injection
-            property_texts = [Property.objects.generate_property_text(p) for p in property_results]
+            # Determine if this is a new search or a conversational follow-up
+            if Property.objects.is_search_query(user_message):
+                # 🔍 New search: extract filters + RAG similarity search
+                chat_logger.info(f"Search query detected: '{user_message}'")
+                filters = Property.objects.extract_search_filters(user_message)
+                property_results = Property.objects.search_by_similarity(user_message, limit=5, filters=filters)
+                property_data = PropertySerializer(property_results, many=True).data
+                property_texts = [p.embedding_text or Property.objects.generate_property_text(p) for p in property_results]
+            else:
+                # 💬 Follow-up: reuse properties from last bot message (skip 2 API calls)
+                chat_logger.info(f"Follow-up detected, reusing previous properties: '{user_message}'")
+                last_bot_msg = ChatMessage.objects.filter(
+                    conversation=conversation, sender='bot'
+                ).order_by('-timestamp').first()
+                if last_bot_msg and last_bot_msg.properties.exists():
+                    property_results = list(last_bot_msg.properties.all())
+                    property_data = PropertySerializer(property_results, many=True).data
+                    property_texts = [p.embedding_text or Property.objects.generate_property_text(p) for p in property_results]
+                else:
+                    property_results = []
+                    property_data = []
+                    property_texts = []
 
             # Get AI response with property context
-            bot_reply = ChatMessage.objects.get_ai_response(conversation, property_context=property_texts)
+            bot_reply = ChatMessage.objects.get_ai_response(conversation, property_context=property_texts if property_texts else None)
 
             # Store bot response
             bot_message = ChatMessage.objects.store_message(conversation, None, bot_reply, "bot")

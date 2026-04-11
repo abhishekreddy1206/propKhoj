@@ -269,6 +269,7 @@ class Property(models.Model):
     embedding = VectorField(dimensions=1536, null=True, db_index=False)
     embedding_updated_at = models.DateTimeField(null=True, blank=True)
     embedding_content_hash = models.CharField(max_length=64, blank=True, null=True)
+    embedding_text = models.TextField(null=True, blank=True)
 
     objects = PropertyManager()
     
@@ -286,6 +287,7 @@ class Property(models.Model):
                     self.embedding = Property.objects.generate_embedding(text)
                     self.embedding_updated_at = timezone.now()
                     self.embedding_content_hash = content_hash
+                    self.embedding_text = text
             except Exception as e:
                 logger.error(f"Error generating embedding during save: {str(e)}")
                 raise
@@ -318,6 +320,8 @@ class Conversation(models.Model):
     started_at = models.DateTimeField(auto_now_add=True)
     last_updated = models.DateTimeField(auto_now=True)
     status = models.CharField(max_length=20, choices=[('active', 'Active'), ('closed', 'Closed')], default='active')
+    summary = models.TextField(null=True, blank=True)
+    summary_message_count = models.IntegerField(default=0)
 
     objects = ConversationManager()  # Assign custom manager
 

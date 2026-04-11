@@ -2,7 +2,7 @@ from datetime import timezone
 from django.db import models
 from django.core.cache import cache
 from openai import OpenAI
-import logging, json
+import logging, json, hashlib, re
 from .models import *
 
 logger = logging.getLogger('django')
@@ -58,18 +58,66 @@ class ChatMessageManager(models.Manager):
         """
         return self.create(conversation=conversation, user=user, text=text, sender=sender)
 
+    MAX_RECENT_MESSAGES = 10  # Keep last 5 turns (user + bot pairs)
+
     def get_chat_history(self, conversation):
         """
-        Retrieve chat history in OpenAI format.
+        Retrieve chat history in OpenAI format with sliding window.
+        For long conversations, older messages are summarized to cap token usage.
         """
-        chat_history = self.filter(conversation=conversation).order_by("timestamp")
+        chat_history = list(self.filter(conversation=conversation).order_by("timestamp"))
+        total_messages = len(chat_history)
         formatted_messages = [{"role": "system", "content": SYSTEM_PROMPT}]
 
-        for msg in chat_history:
+        if total_messages > self.MAX_RECENT_MESSAGES:
+            # Summarize older messages if summary is stale
+            older_count = total_messages - self.MAX_RECENT_MESSAGES
+            if conversation.summary_message_count < older_count:
+                older_messages = chat_history[:older_count]
+                self._update_conversation_summary(conversation, older_messages, older_count)
+
+            if conversation.summary:
+                formatted_messages.append({
+                    "role": "system",
+                    "content": f"Summary of earlier conversation: {conversation.summary}"
+                })
+
+            # Only include recent messages
+            recent_messages = chat_history[-self.MAX_RECENT_MESSAGES:]
+        else:
+            recent_messages = chat_history
+
+        for msg in recent_messages:
             role = "user" if msg.sender == "user" else "assistant"
             formatted_messages.append({"role": role, "content": msg.text})
 
         return formatted_messages
+
+    def _update_conversation_summary(self, conversation, older_messages, older_count):
+        """
+        Generate a summary of older conversation messages and store it.
+        """
+        try:
+            summary_input = "\n".join(
+                f"{msg.sender}: {msg.text}" for msg in older_messages
+            )
+            response = get_openai_client().chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "Summarize this real estate conversation in 2-3 sentences. Preserve the user's preferences, budget, desired location, property type, and any specific properties discussed."},
+                    {"role": "user", "content": summary_input}
+                ],
+                max_tokens=150
+            )
+            if response.usage:
+                chat_logger.info(f"OpenAI usage [conversation_summary]: {response.usage.prompt_tokens}p/{response.usage.completion_tokens}c tokens")
+
+            conversation.summary = response.choices[0].message.content
+            conversation.summary_message_count = older_count
+            conversation.save(update_fields=['summary', 'summary_message_count'])
+            chat_logger.info(f"Updated summary for conversation {conversation.id} ({older_count} messages summarized)")
+        except Exception as e:
+            logger.error(f"Error generating conversation summary: {str(e)}")
 
     def get_ai_response(self, conversation, property_context=None):
         """
@@ -84,14 +132,17 @@ class ChatMessageManager(models.Manager):
                 context_text += f"{i}. {prop_text}\n\n"
             context_text += "Use these properties in your response. Reference them by name and provide specific details. If none match well, say so and ask clarifying questions."
 
-            # Insert property context just before the last user message
-            messages.insert(-1, {"role": "system", "content": context_text})
+            # Append property context after the user's question for proper RAG grounding
+            messages.append({"role": "system", "content": context_text})
 
         try:
             response = get_openai_client().chat.completions.create(
                 model="gpt-4o-mini",
-                messages=messages
+                messages=messages,
+                max_tokens=800
             )
+            if response.usage:
+                chat_logger.info(f"OpenAI usage [get_ai_response]: {response.usage.prompt_tokens}p/{response.usage.completion_tokens}c tokens")
             return response.choices[0].message.content
         except Exception as e:
             logger.error(f"OpenAI API error: {str(e)}")
@@ -145,9 +196,11 @@ class ChatMessageManager(models.Manager):
                 ]
             else:
                 chat_history = self.get_chat_history(conversation)
+                # Only use the last 6 messages for follow-up generation to save tokens
+                recent_history = chat_history[1:][-6:]
                 messages = [
                     {"role": "system", "content": system_prompt},
-                    *chat_history[1:],
+                    *recent_history,
                     {"role": "user",
                      "content": f"""Based on this conversation, what are 4 relevant follow-up questions I might want to ask?
                                     Use these as examples but not the same: {json.dumps(sample_prompts_followup)}"""}
@@ -158,8 +211,11 @@ class ChatMessageManager(models.Manager):
             response = get_openai_client().chat.completions.create(
                 model="gpt-4o-mini",
                 messages=messages,
-                response_format={"type": "json_object"}
+                response_format={"type": "json_object"},
+                max_tokens=200
             )
+            if response.usage:
+                chat_logger.info(f"OpenAI usage [get_sample_prompts]: {response.usage.prompt_tokens}p/{response.usage.completion_tokens}c tokens")
 
             content = response.choices[0].message.content
             logger.info(f"OpenAI sample prompts response received ({len(content)} chars)")
@@ -180,16 +236,65 @@ class ChatMessageManager(models.Manager):
 
 
 class PropertyManager(models.Manager):
-    def generate_embedding(self, text):
+    # Property-related keywords for search intent detection
+    SEARCH_KEYWORDS = re.compile(
+        r'\b('
+        r'bhk|bedroom|bathroom|apartment|flat|house|villa|plot|office|commercial|residential|'
+        r'rent|buy|purchase|sell|lease|invest|'
+        r'lakh|lac|crore|cr|budget|under|above|below|between|price|cost|afford|'
+        r'sqft|sq\s*ft|square\s*feet|area|size|'
+        r'furnished|unfurnished|semi-furnished|parking|amenit|'
+        r'bangalore|mumbai|delhi|pune|hyderabad|chennai|kolkata|gurgaon|noida|'
+        r'sacramento|san\s*francisco|los\s*angeles|new\s*york|austin|seattle|'
+        r'find|search|show|list|looking\s+for|suggest|recommend'
+        r')\b',
+        re.IGNORECASE
+    )
+    # Pattern for numeric property specs like "2BHK", "3 bed", "$500k"
+    NUMERIC_SPEC = re.compile(r'\d+\s*(?:bhk|bed|bath|lakh|lac|cr|crore|k|m|l)', re.IGNORECASE)
+    # Currency patterns
+    CURRENCY_PATTERN = re.compile(r'[$₹€£]\s*\d+|\d+\s*[$₹€£]')
+
+    def is_search_query(self, message):
         """
-        Generate OpenAI embedding for given text
+        Determine if a message is a new property search query vs a conversational follow-up.
+        Returns True if the message likely contains search intent.
         """
+        text = message.strip()
+        # Check for numeric property specs (e.g., "2BHK", "3 bed")
+        if self.NUMERIC_SPEC.search(text):
+            return True
+        # Check for currency amounts
+        if self.CURRENCY_PATTERN.search(text):
+            return True
+        # Check for property-related keywords
+        if self.SEARCH_KEYWORDS.search(text):
+            return True
+        return False
+
+    def generate_embedding(self, text, use_cache=False):
+        """
+        Generate OpenAI embedding for given text.
+        If use_cache=True, checks Django cache first (for query embeddings).
+        """
+        if use_cache:
+            cache_key = f"qemb:{hashlib.md5(text.strip().lower().encode()).hexdigest()}"
+            cached = cache.get(cache_key)
+            if cached:
+                logger.info("Query embedding cache hit")
+                return cached
+
         try:
             response = get_openai_client().embeddings.create(
                 model="text-embedding-3-small",
                 input=text
             )
-            return list(response.data[0].embedding)
+            embedding = list(response.data[0].embedding)
+
+            if use_cache:
+                cache.set(cache_key, embedding, timeout=86400)
+
+            return embedding
         except Exception as e:
             logger.error(f"Error generating embedding: {str(e)}")
             raise
@@ -282,7 +387,7 @@ class PropertyManager(models.Manager):
         Search properties using vector similarity
         """
         try:
-            query_embedding = self.generate_embedding(query)
+            query_embedding = self.generate_embedding(query, use_cache=True)
 
             # Start with base query
             queryset = self.get_queryset()
@@ -337,6 +442,9 @@ class PropertyManager(models.Manager):
                 tool_choice="auto",
                 max_tokens=100
             )
+
+            if response.usage:
+                chat_logger.info(f"OpenAI usage [extract_search_filters]: {response.usage.prompt_tokens}p/{response.usage.completion_tokens}c tokens")
 
             if response.choices[0].message.tool_calls:
                 args = json.loads(response.choices[0].message.tool_calls[0].function.arguments)

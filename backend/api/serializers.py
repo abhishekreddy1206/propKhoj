@@ -49,7 +49,7 @@ class CustomUserSerializer(UserDetailsSerializer):
 class PropertySerializer(serializers.ModelSerializer):
     class Meta:
         model = Property
-        exclude = ['embedding', 'embedding_updated_at']
+        exclude = ['embedding', 'embedding_updated_at', 'embedding_content_hash', 'embedding_text']
     
     def create(self, validated_data):
         address_data = validated_data.pop('address')

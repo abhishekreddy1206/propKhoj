@@ -224,6 +224,3 @@ We welcome contributions! Please fork the repository and submit a pull request f
 
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
 
-## Contact
-
-For any inquiries or support, please contact [support@propkhoj.com](mailto:support@propkhoj.com).

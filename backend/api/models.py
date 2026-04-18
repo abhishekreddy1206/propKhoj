@@ -103,7 +103,7 @@ class User(AbstractUser):
     ]
 
     user_type = models.CharField(max_length=10, choices=USER_TYPE_CHOICES, default='buyer')
-    phone_number = models.CharField(max_length=15, unique=True)
+    phone_number = models.CharField(max_length=15, unique=True, blank=True, null=True)
     device_info = models.CharField(max_length=255, blank=True, null=True)
     address = models.ForeignKey(Address, on_delete=models.SET_NULL, null=True, blank=True)
     profile_image = models.URLField(max_length=500, blank=True, null=True)

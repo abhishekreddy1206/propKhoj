@@ -7,7 +7,7 @@ from rest_framework import viewsets, status
 from rest_framework.response import Response
 from rest_framework.decorators import action
 from rest_framework.authtoken.models import Token
-from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly
+from rest_framework.permissions import AllowAny, BasePermission, IsAuthenticated, SAFE_METHODS
 from rest_framework.authentication import SessionAuthentication, TokenAuthentication
 from rest_framework.throttling import ScopedRateThrottle
 from django.utils.decorators import method_decorator
@@ -19,6 +19,43 @@ import logging
 
 logger = logging.getLogger('django')
 chat_logger = logging.getLogger('chat')
+
+
+def user_is_admin(user):
+    return bool(
+        user
+        and user.is_authenticated
+        and (
+            user.is_staff
+            or user.is_superuser
+            or user.user_type == 'admin'
+            or user.groups.filter(name='Admin').exists()
+        )
+    )
+
+
+def user_can_manage_properties(user):
+    return bool(
+        user
+        and user.is_authenticated
+        and (
+            user_is_admin(user)
+            or user.user_type == 'agent'
+            or user.groups.filter(name='Agent').exists()
+        )
+    )
+
+
+class IsAdminUserViewPermission(BasePermission):
+    def has_permission(self, request, view):
+        return user_is_admin(request.user)
+
+
+class IsAdminOrAgentWritePermission(BasePermission):
+    def has_permission(self, request, view):
+        if request.method in SAFE_METHODS:
+            return True
+        return user_can_manage_properties(request.user)
 
 class ChatMessageViewSet(viewsets.ModelViewSet):
     authentication_classes = [SessionAuthentication, TokenAuthentication]
@@ -134,7 +171,11 @@ class ChatMessageViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['post'])
     def message_feedback(self, request, chat_id):
         try:
-            message = ChatMessage.objects.get(id=chat_id)
+            message = ChatMessage.objects.get(
+                id=chat_id,
+                sender='bot',
+                conversation__user=request.user,
+            )
             message.feedback = request.data.get('feedback')
             message.feedback_timestamp = timezone.now()
             message.save()
@@ -161,7 +202,7 @@ class ConversationViewSet(viewsets.ModelViewSet):
 class PropertyViewSet(viewsets.ModelViewSet):
     queryset = Property.objects.all()
     serializer_class = PropertySerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [IsAdminOrAgentWritePermission]
 
     @action(detail=False, methods=['get'])
     def search(self, request):
@@ -175,9 +216,17 @@ class PropertyViewSet(viewsets.ModelViewSet):
         return Response({"error": "No query provided"}, status=400)
 
 
-class UserViewSet(viewsets.ModelViewSet):
+class UserViewSet(viewsets.ReadOnlyModelViewSet):
+    authentication_classes = [SessionAuthentication, TokenAuthentication]
     queryset = User.objects.all()
     serializer_class = UserSerializer
+
+    def get_permissions(self):
+        if self.action == 'login':
+            return [AllowAny()]
+        if self.action == 'me':
+            return [IsAuthenticated()]
+        return [IsAdminUserViewPermission()]
 
     @method_decorator(ensure_csrf_cookie)
     @action(detail=False, methods=['post'])
@@ -191,28 +240,14 @@ class UserViewSet(viewsets.ModelViewSet):
         user = authenticate(username=email, password=password)
         if user:
             token, _ = Token.objects.get_or_create(user=user)
-            logger.info(f"[{now()}] User {user.username} logged in successfully")
+            logger.info(f"[{timezone.now()}] User {user.username} logged in successfully")
             return Response({
                 'token': token.key,
                 'user': UserSerializer(user).data
             }, status=status.HTTP_200_OK)
         else:
-            logger.warning(f"[{now()}] Failed login attempt: {email}")
+            logger.warning(f"[{timezone.now()}] Failed login attempt: {email}")
             return Response({'error': 'Invalid credentials'}, status=status.HTTP_400_BAD_REQUEST)
-    
-    def create(self, request, *args, **kwargs):
-        """
-        Create a new user and return token.
-        """
-        serializer = self.get_serializer(data=request.data)
-        if serializer.is_valid():
-            user = serializer.save()
-            token, _ = Token.objects.get_or_create(user=user)
-            return Response({
-                'token': token.key,
-                'user': UserSerializer(user).data
-            }, status=status.HTTP_201_CREATED)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     @action(detail=False, methods=['get'])
     def me(self, request):

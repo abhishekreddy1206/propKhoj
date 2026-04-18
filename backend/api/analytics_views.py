@@ -49,7 +49,11 @@ class TopicTrendsView(BaseAnalyticsAPIView):
         analytics = self.get_analytics()
         time_period = self.get_time_period()
         trends = analytics.get_topic_trends(time_period=time_period)
-        return JsonResponse({"topic_trends": trends})
+        return JsonResponse({
+            "topic_trends": trends,
+            # Temporary compatibility alias for the current frontend dashboard.
+            "topics": [{"topic": topic, "count": count} for topic, count in trends.items()],
+        })
 
 
 class PropertyInterestView(BaseAnalyticsAPIView):

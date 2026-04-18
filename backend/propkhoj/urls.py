@@ -14,6 +14,7 @@ Including another URLconf
     1. Import the include() function: from django.urls import include, path
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
+from django.conf import settings
 from django.http import JsonResponse
 from django.contrib import admin
 from django.urls import path, include
@@ -27,25 +28,25 @@ from allauth.socialaccount.providers.facebook.views import FacebookOAuth2Adapter
 from allauth.socialaccount.providers.github.views import GitHubOAuth2Adapter
 from allauth.socialaccount.providers.oauth2.client import OAuth2Client
 from .auth_views import (
-    GoogleLoginInit, GoogleLoginCallback,
-    FacebookLoginInit, FacebookLoginCallback,
-    GithubLoginInit, GithubLoginCallback
+    GoogleLoginInit,
+    FacebookLoginInit,
+    GithubLoginInit,
 )
 
 class GoogleLogin(SocialLoginView):
     adapter_class = GoogleOAuth2Adapter
-    callback_url = "http://localhost:3000"
+    callback_url = settings.OAUTH_REDIRECT_URI
     client_class = OAuth2Client
 
 class FacebookLogin(SocialLoginView):
     adapter_class = FacebookOAuth2Adapter
-    callback_url = "http://localhost:3000"
+    callback_url = settings.OAUTH_REDIRECT_URI
     client_class = OAuth2Client
 
 
 class GithubLogin(SocialLoginView):
     adapter_class = GitHubOAuth2Adapter
-    callback_url = "http://localhost:3000"
+    callback_url = settings.OAUTH_REDIRECT_URI
     client_class = OAuth2Client
 
 
@@ -69,13 +70,8 @@ urlpatterns = [
     path('auth/github/', GithubLogin.as_view(), name='github_login'),
 
     path('auth/google/init/', GoogleLoginInit.as_view(), name='google_login_init'),
-    path('auth/google/callback/', GoogleLoginCallback.as_view(), name='google_login_callback'),
-    
     path('auth/facebook/init/', FacebookLoginInit.as_view(), name='facebook_login_init'),
-    path('auth/facebook/callback/', FacebookLoginCallback.as_view(), name='facebook_login_callback'),
-    
     path('auth/github/init/', GithubLoginInit.as_view(), name='github_login_init'),
-    path('auth/github/callback/', GithubLoginCallback.as_view(), name='github_login_callback'),
 
     # 🔹 API Routes
     path('api/', include('api.urls')),

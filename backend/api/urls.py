@@ -13,7 +13,7 @@ from .analytics_views import (
 router = DefaultRouter()
 router.register(r'properties', PropertyViewSet)
 # router.register(r'chats', ChatMessageViewSet, basename="chats")
-router.register(r'conversations', ConversationViewSet)
+router.register(r'conversations', ConversationViewSet, basename='conversations')
 router.register(r'users', UserViewSet)
 router.register(r'profile', UserProfileView, basename='profile')
 

@@ -6,7 +6,7 @@ from openai import OpenAI
 from collections import Counter
 import numpy as np
 from .models import (
-    Conversation, ChatMessage, Property
+    Conversation, ChatMessage, Property, User
 )
 
 class ChatAnalytics:
@@ -18,6 +18,7 @@ class ChatAnalytics:
         cutoff_date = timezone.now() - timedelta(days=time_period)
         
         metrics = {
+            'total_users': User.objects.count(),
             'total_conversations': Conversation.objects.filter(started_at__gte=cutoff_date).count(),
             'active_conversations': Conversation.objects.filter(status='active').count(),
             'avg_messages_per_conversation': ChatMessage.objects.filter(
@@ -29,6 +30,7 @@ class ChatAnalytics:
             'feedback_metrics': self._calculate_feedback_metrics(cutoff_date),
             'conversations_by_day': self._get_conversations_by_day(time_period),
             'peak_usage_hours': self._get_peak_usage_hours(cutoff_date),
+            'chats_by_location': self._get_chats_by_location(cutoff_date),
         }
         
         return metrics
@@ -99,9 +101,34 @@ class ChatAnalytics:
         messages = ChatMessage.objects.filter(
             timestamp__gte=cutoff_date
         ).extra({'hour': "EXTRACT(hour FROM timestamp)"})
-        
+
         hourly_counts = messages.values('hour').annotate(count=Count('id'))
         return {int(item['hour']): item['count'] for item in hourly_counts}
+
+    def _get_chats_by_location(self, cutoff_date):
+        """Summarize conversation share by user location for dashboard display."""
+        location_counts = list(
+            Conversation.objects.filter(
+                started_at__gte=cutoff_date,
+                user__address__city__isnull=False,
+                user__address__state__isnull=False,
+            )
+            .values('user__address__city', 'user__address__state')
+            .annotate(count=Count('id'))
+            .order_by('-count')[:5]
+        )
+
+        total_conversations = sum(item['count'] for item in location_counts)
+        if not total_conversations:
+            return []
+
+        return [
+            {
+                'location': f"{item['user__address__city']}, {item['user__address__state']}",
+                'percentage': round((item['count'] / total_conversations) * 100, 1),
+            }
+            for item in location_counts
+        ]
     
     def get_topic_trends(self, time_period=30):
         """Analyze conversation topics and extract trends using AI"""

@@ -5,6 +5,7 @@ from rest_framework.test import APIClient
 from rest_framework import status
 from rest_framework.authtoken.models import Token
 from .models import User, Property, Conversation, ChatMessage, Address, Currency, PropertyType, ListingStatus
+from .chat_analytics import ChatAnalytics
 
 
 class TestHelperMixin:
@@ -201,3 +202,93 @@ class PropertyViewSetPermissionTests(TestHelperMixin, TestCase):
         client = APIClient()
         response = client.post('/api/properties/', {'title': 'New'}, format='json')
         self.assertIn(response.status_code, [status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN])
+
+    def test_authenticated_buyer_cannot_create_property(self):
+        client, _ = self.create_auth_client()
+        response = client.post('/api/properties/', {'title': 'New'}, format='json')
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+
+class UserModelTests(TestHelperMixin, TestCase):
+    """Test user model constraints used by auth flows."""
+
+    def test_user_can_be_created_without_phone_number(self):
+        user = User.objects.create_user(
+            username='nophone',
+            email='nophone@example.com',
+            password='testpass123',
+        )
+        self.assertIsNone(user.phone_number)
+
+
+class UserViewSetPermissionTests(TestHelperMixin, TestCase):
+    """Test admin-only access to router-exposed user endpoints."""
+
+    def test_unauthenticated_cannot_list_users(self):
+        client = APIClient()
+        response = client.get('/api/users/')
+        self.assertIn(response.status_code, [status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN])
+
+    def test_non_admin_cannot_list_users(self):
+        client, _ = self.create_auth_client()
+        response = client.get('/api/users/')
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_admin_can_list_users(self):
+        admin = self.create_user(email='admin@test.com', username='adminuser', user_type='admin')
+        admin.is_staff = True
+        admin.save(update_fields=['is_staff'])
+        self.create_user(email='viewer@test.com', username='viewer')
+
+        client, _ = self.create_auth_client(admin)
+        response = client.get('/api/users/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertGreaterEqual(len(response.data), 2)
+
+
+class ChatFeedbackTests(TestHelperMixin, TestCase):
+    """Test feedback is limited to the message owner."""
+
+    def test_owner_can_submit_feedback(self):
+        client, user = self.create_auth_client()
+        conversation = Conversation.objects.create(user=user)
+        message = ChatMessage.objects.create(conversation=conversation, sender='bot', text='hello')
+
+        response = client.post(f'/api/chats/feedback/{message.id}/', {'feedback': 'like'}, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        message.refresh_from_db()
+        self.assertEqual(message.feedback, 'like')
+        self.assertIsNotNone(message.feedback_timestamp)
+
+    def test_other_user_cannot_submit_feedback(self):
+        owner = self.create_user(email='owner@test.com', username='owner')
+        other_client, _ = self.create_auth_client()
+        conversation = Conversation.objects.create(user=owner)
+        message = ChatMessage.objects.create(conversation=conversation, sender='bot', text='hello')
+
+        response = other_client.post(f'/api/chats/feedback/{message.id}/', {'feedback': 'dislike'}, format='json')
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+
+class AnalyticsViewTests(TestHelperMixin, TestCase):
+    """Test compatibility aliases used by the frontend dashboard."""
+
+    @patch.object(ChatAnalytics, 'get_topic_trends', return_value={'budget': 3, 'rentals': 1})
+    def test_topic_trends_returns_topics_alias(self, mock_trends):
+        admin = self.create_user(email='analytics@test.com', username='analytics', user_type='admin')
+        admin.is_staff = True
+        admin.save(update_fields=['is_staff'])
+
+        client = APIClient()
+        client.force_login(admin)
+
+        response = client.get('/api/analytics/topics/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response.json()['topics'],
+            [
+                {'topic': 'budget', 'count': 3},
+                {'topic': 'rentals', 'count': 1},
+            ]
+        )
